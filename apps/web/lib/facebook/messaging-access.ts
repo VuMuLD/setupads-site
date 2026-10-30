@@ -38,7 +38,26 @@ export function clearMessagingPermissionCache(userId?: string): void {
   else permCache.clear();
 }
 
-export async function refreshPageTokens(userId: string): Promise<number> {
+/**
+ * Chặn làm mới token dồn dập: refreshPageTokens được gọi ở MỌI lần đồng bộ
+ * tin nhắn (nay thêm cả mỗi sự kiện webhook) mà mỗi lần lại gọi Graph
+ * /me/accounts + ghi lại token của mọi Page. Token Page sống lâu nên chỉ cần
+ * làm mới tối đa 10 phút/lần cho mỗi user; truyền force=true khi cần ngay.
+ */
+const REFRESH_TTL_MS = 10 * 60 * 1000;
+const lastRefreshAt = new Map<string, number>();
+
+export async function refreshPageTokens(
+  userId: string,
+  force = false
+): Promise<number> {
+  const now = Date.now();
+  const last = lastRefreshAt.get(userId) ?? 0;
+  if (!force && now - last < REFRESH_TTL_MS) {
+    return 0;
+  }
+  lastRefreshAt.set(userId, now);
+
   const userToken = await getFacebookAccessToken(userId);
   if (!userToken) {
     throw new MessagingPermissionError(
