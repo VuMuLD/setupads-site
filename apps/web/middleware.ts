@@ -5,7 +5,7 @@ import { appUrl } from "@/lib/site-url";
 export async function middleware(request: Request) {
   const { pathname } = new URL(request.url);
 
-  const publicPaths = ["/login", "/register", "/privacy", "/oauth-check", "/oauth.php", "/api/auth", "/api/facebook/diagnostic", "/api/facebook/data-deletion", "/api/facebook/callback", "/api/uploads"];
+  const publicPaths = ["/login", "/register", "/privacy", "/oauth-check", "/oauth.php", "/api/auth", "/api/facebook/diagnostic", "/api/facebook/data-deletion", "/api/facebook/callback", "/api/facebook/webhook", "/api/uploads"];
   const isPublic = publicPaths.some((p) => pathname.startsWith(p));
 
   if (isPublic) return NextResponse.next();
