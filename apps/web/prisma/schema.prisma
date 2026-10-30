@@ -1,0 +1,592 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+enum MessageDirection {
+  INBOUND
+  OUTBOUND
+}
+
+enum UserRole {
+  ADMIN
+  MANAGER
+  VIEWER
+}
+
+enum RecommendationStatus {
+  PENDING
+  APPLIED
+  REJECTED
+}
+
+enum RecommendationType {
+  INCREASE_BUDGET
+  DECREASE_BUDGET
+  PAUSE_CAMPAIGN
+  RESUME_CAMPAIGN
+  CHANGE_TARGETING
+  DUPLICATE_CAMPAIGN
+  OPTIMIZE_CREATIVE
+}
+
+enum CampaignStatus {
+  ACTIVE
+  PAUSED
+  DELETED
+  ARCHIVED
+}
+
+enum NotificationChannel {
+  WEB
+  EMAIL
+  TELEGRAM
+}
+
+model User {
+  id            String    @id @default(cuid())
+  email         String?   @unique
+  name          String?
+  image         String?
+  passwordHash  String?   @map("password_hash")
+  role          UserRole  @default(MANAGER)
+  twoFaSecret   String?   @map("two_fa_secret")
+  emailVerified DateTime? @map("email_verified")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+  deletedAt     DateTime? @map("deleted_at")
+
+  accounts           Account[]
+  sessions           Session[]
+  facebookAccounts   FacebookAccount[]
+  aiChatMessages     AIChatMessage[]
+  aiRecommendations  AIRecommendation[]
+  automationRules    AutomationRule[]
+  notifications      Notification[]
+  auditLogs          AuditLog[]
+
+  @@map("users")
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String  @map("user_id")
+  type              String
+  provider          String
+  providerAccountId String  @map("provider_account_id")
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique @map("session_token")
+  userId       String   @map("user_id")
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+}
+
+model FacebookAccount {
+  id                    String    @id @default(cuid())
+  userId                String    @map("user_id")
+  fbUserId              String    @map("fb_user_id")
+  accessTokenEncrypted  String    @map("access_token_encrypted") @db.Text
+  refreshTokenEncrypted String?   @map("refresh_token_encrypted") @db.Text
+  expiresAt             DateTime? @map("expires_at")
+  isActive              Boolean   @default(true) @map("is_active")
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
+
+  user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  pages      Page[]
+  adAccounts AdAccount[]
+
+  @@unique([userId, fbUserId])
+  @@map("facebook_accounts")
+}
+
+model Page {
+  id                   String    @id @default(cuid())
+  facebookAccountId    String    @map("facebook_account_id")
+  fbPageId             String    @map("fb_page_id")
+  name                 String
+  accessTokenEncrypted String?   @map("access_token_encrypted") @db.Text
+  category             String?
+  isActive             Boolean   @default(true) @map("is_active")
+  isSelected           Boolean   @default(false) @map("is_selected")
+  autoAiEnabled        Boolean   @default(false) @map("auto_ai_enabled")
+  aiTone               String?   @default("friendly") @map("ai_tone")
+  aiConsultingInsights Json?     @map("ai_consulting_insights")
+  lastMessageSyncAt    DateTime? @map("last_message_sync_at")
+  createdAt            DateTime  @default(now()) @map("created_at")
+  updatedAt            DateTime  @updatedAt @map("updated_at")
+
+  facebookAccount FacebookAccount    @relation(fields: [facebookAccountId], references: [id], onDelete: Cascade)
+  conversations   PageConversation[]
+  products        PageProduct[]
+  customerPhotos  PageCustomerPhoto[]
+  messageTemplates PageMessageTemplate[]
+  broadcasts      PageBroadcast[]
+  customers       PageCustomer[]
+  customerLearnings PageCustomerLearning[]
+  customerOrders  PageCustomerOrder[]
+
+  @@unique([facebookAccountId, fbPageId])
+  @@map("pages")
+}
+
+model PageConversation {
+  id               String    @id @default(cuid())
+  pageId           String    @map("page_id")
+  fbConversationId String    @map("fb_conversation_id")
+  participantName  String?   @map("participant_name")
+  participantFbId  String?   @map("participant_fb_id")
+  snippet          String?   @db.Text
+  unreadCount      Int       @default(0) @map("unread_count")
+  lastMessageAt    DateTime? @map("last_message_at")
+  manualLabels     Json?     @map("manual_labels")
+  customerId       String?   @map("customer_id")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  page     Page          @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  customer PageCustomer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  messages PageMessage[]
+
+  @@unique([pageId, fbConversationId])
+  @@index([customerId])
+  @@map("page_conversations")
+}
+
+model PageCustomer {
+  id               String    @id @default(cuid())
+  pageId           String    @map("page_id")
+  participantFbId  String    @map("participant_fb_id")
+  participantName  String?   @map("participant_name")
+  phone            String?
+  address          String?   @db.Text
+  preferences      Json?
+  aiMemorySummary  String?   @map("ai_memory_summary") @db.Text
+  totalOrders      Int       @default(0) @map("total_orders")
+  totalSpent       Float?    @map("total_spent")
+  successfulCloses Int       @default(0) @map("successful_closes")
+  conversationCount Int      @default(0) @map("conversation_count")
+  lastContactAt    DateTime? @map("last_contact_at")
+  firstContactAt   DateTime? @map("first_contact_at")
+  isReturning      Boolean   @default(false) @map("is_returning")
+  lastLearnedAt    DateTime? @map("last_learned_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  page          Page                   @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  conversations PageConversation[]
+  orders        PageCustomerOrder[]
+  learnings     PageCustomerLearning[]
+
+  @@unique([pageId, participantFbId])
+  @@map("page_customers")
+}
+
+model PageCustomerOrder {
+  id              String    @id @default(cuid())
+  pageId          String    @map("page_id")
+  customerId      String    @map("customer_id")
+  conversationId  String?   @map("conversation_id")
+  orderCode       String?   @map("order_code")
+  participantName String?   @map("participant_name")
+  productIds      Json?     @map("product_ids")
+  productSummary  String?   @map("product_summary") @db.Text
+  phone           String?
+  address         String?   @db.Text
+  size            String?
+  quantity        Int?
+  amount          Float?
+  shippingFee     Float?    @map("shipping_fee")
+  status          String    @default("received")
+  sourceMessageId String?   @map("source_message_id")
+  confirmationSentAt DateTime? @map("confirmation_sent_at")
+  confirmedAt     DateTime  @default(now()) @map("confirmed_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  page     Page         @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  customer PageCustomer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([pageId, confirmedAt])
+  @@index([customerId])
+  @@index([conversationId])
+  @@map("page_customer_orders")
+}
+
+model PageCustomerLearning {
+  id             String   @id @default(cuid())
+  pageId         String   @map("page_id")
+  customerId     String?  @map("customer_id")
+  conversationId String?  @map("conversation_id")
+  category       String
+  insight        String   @db.Text
+  effectiveReply String?  @map("effective_reply") @db.Text
+  stage          String?
+  outcome        String?
+  useCount       Int      @default(1) @map("use_count")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  page     Page          @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  customer PageCustomer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+
+  @@index([pageId, category])
+  @@index([customerId])
+  @@map("page_customer_learnings")
+}
+
+model PageMessage {
+  id               String           @id @default(cuid())
+  conversationId   String           @map("conversation_id")
+  fbMessageId      String           @map("fb_message_id")
+  direction        MessageDirection
+  text             String           @db.Text
+  attachments      Json?
+  sentAt           DateTime         @map("sent_at")
+  aiSuggestedReply String?          @map("ai_suggested_reply") @db.Text
+  aiReplyAt        DateTime?        @map("ai_reply_at")
+  aiModel          String?          @map("ai_model")
+  recommendedProducts Json?         @map("recommended_products")
+  createdAt        DateTime         @default(now()) @map("created_at")
+
+  conversation PageConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@unique([conversationId, fbMessageId])
+  @@map("page_messages")
+}
+
+model PageProduct {
+  id          String   @id @default(cuid())
+  pageId      String   @map("page_id")
+  name        String
+  description String?  @db.Text
+  price       Float?
+  currency    String   @default("VND")
+  imageUrl    String?  @map("image_url") @db.Text
+  imageUrls   Json?    @map("image_urls")
+  isActive    Boolean  @default(true) @map("is_active")
+  sortOrder   Int      @default(0) @map("sort_order")
+  tags        Json?
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  page           Page                @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  customerPhotos PageCustomerPhoto[]
+
+  @@map("page_products")
+}
+
+model PageCustomerPhoto {
+  id           String   @id @default(cuid())
+  pageId       String   @map("page_id")
+  productId    String?  @map("product_id")
+  customerName String?  @map("customer_name")
+  caption      String?  @db.Text
+  imageUrl     String   @map("image_url") @db.Text
+  sortOrder    Int      @default(0) @map("sort_order")
+  isActive     Boolean  @default(true) @map("is_active")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  page    Page         @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  product PageProduct? @relation(fields: [productId], references: [id], onDelete: SetNull)
+
+  @@map("page_customer_photos")
+}
+
+model PageMessageTemplate {
+  id         String   @id @default(cuid())
+  pageId     String   @map("page_id")
+  name       String
+  category   String   @default("old_customer")
+  text       String   @db.Text
+  imageUrls  Json?    @map("image_urls")
+  productIds Json?    @map("product_ids")
+  isActive   Boolean  @default(true) @map("is_active")
+  sortOrder  Int      @default(0) @map("sort_order")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  page       Page            @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  broadcasts PageBroadcast[]
+
+  @@map("page_message_templates")
+}
+
+model PageBroadcast {
+  id          String   @id @default(cuid())
+  pageId      String   @map("page_id")
+  templateId  String?  @map("template_id")
+  audience    String   @default("purchased")
+  text        String   @db.Text
+  imageUrls   Json?    @map("image_urls")
+  status      String   @default("pending")
+  totalCount  Int      @default(0) @map("total_count")
+  sentCount   Int      @default(0) @map("sent_count")
+  failedCount Int      @default(0) @map("failed_count")
+  results     Json?
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  page     Page                 @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  template PageMessageTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
+
+  @@map("page_broadcasts")
+}
+
+model AdAccount {
+  id                String   @id @default(cuid())
+  facebookAccountId String   @map("facebook_account_id")
+  fbAdAccountId     String   @map("fb_ad_account_id")
+  name              String
+  currency          String   @default("VND")
+  timezone          String   @default("Asia/Ho_Chi_Minh")
+  isSelected        Boolean  @default(false) @map("is_selected")
+  isActive          Boolean  @default(true) @map("is_active")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  facebookAccount FacebookAccount @relation(fields: [facebookAccountId], references: [id], onDelete: Cascade)
+  campaigns       Campaign[]
+  dailyInsights   DailyInsight[]
+
+  @@unique([facebookAccountId, fbAdAccountId])
+  @@map("ad_accounts")
+}
+
+model Campaign {
+  id           String         @id @default(cuid())
+  adAccountId  String         @map("ad_account_id")
+  fbCampaignId String         @map("fb_campaign_id")
+  name         String
+  status       CampaignStatus @default(ACTIVE)
+  objective    String?
+  dailyBudget  Float?         @map("daily_budget")
+  lifetimeBudget Float?       @map("lifetime_budget")
+  startTime    DateTime?      @map("start_time")
+  stopTime     DateTime?      @map("stop_time")
+  buyingType   String?        @map("buying_type")
+  bidStrategy  String?        @map("bid_strategy")
+  setupConfig  Json?          @map("setup_config")
+  lastSyncedAt DateTime?      @map("last_synced_at")
+  createdAt    DateTime       @default(now()) @map("created_at")
+  updatedAt    DateTime       @updatedAt @map("updated_at")
+  deletedAt    DateTime?      @map("deleted_at")
+
+  adAccount   AdAccount          @relation(fields: [adAccountId], references: [id], onDelete: Cascade)
+  adSets      AdSet[]
+  insights    CampaignInsight[]
+  recommendations AIRecommendation[]
+
+  @@unique([adAccountId, fbCampaignId])
+  @@map("campaigns")
+}
+
+model AdSet {
+  id          String         @id @default(cuid())
+  campaignId  String         @map("campaign_id")
+  fbAdSetId   String         @map("fb_ad_set_id")
+  name        String
+  status      CampaignStatus @default(ACTIVE)
+  dailyBudget Float?         @map("daily_budget")
+  lifetimeBudget Float?      @map("lifetime_budget")
+  bidAmount   Float?         @map("bid_amount")
+  bidStrategy String?        @map("bid_strategy")
+  billingEvent String?       @map("billing_event")
+  optimizationGoal String?  @map("optimization_goal")
+  targeting   Json?
+  setupConfig Json?          @map("setup_config")
+  lastSyncedAt DateTime?     @map("last_synced_at")
+  createdAt   DateTime       @default(now()) @map("created_at")
+  updatedAt   DateTime       @updatedAt @map("updated_at")
+  deletedAt   DateTime?      @map("deleted_at")
+
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  ads      Ad[]
+
+  @@unique([campaignId, fbAdSetId])
+  @@map("ad_sets")
+}
+
+model Ad {
+  id          String         @id @default(cuid())
+  adSetId     String         @map("ad_set_id")
+  fbAdId      String         @map("fb_ad_id")
+  name        String
+  status      CampaignStatus @default(ACTIVE)
+  creative    Json?
+  lastSyncedAt DateTime?     @map("last_synced_at")
+  createdAt   DateTime       @default(now()) @map("created_at")
+  updatedAt   DateTime       @updatedAt @map("updated_at")
+  deletedAt   DateTime?      @map("deleted_at")
+
+  adSet AdSet @relation(fields: [adSetId], references: [id], onDelete: Cascade)
+
+  @@unique([adSetId, fbAdId])
+  @@map("ads")
+}
+
+model CampaignInsight {
+  id          String   @id @default(cuid())
+  campaignId  String   @map("campaign_id")
+  date        DateTime @db.Date
+  spend       Float    @default(0)
+  impressions Int      @default(0)
+  clicks      Int      @default(0)
+  conversions Float    @default(0)
+  roas        Float    @default(0)
+  cpc         Float    @default(0)
+  ctr         Float    @default(0)
+  cpm         Float    @default(0)
+  reach       Int      @default(0)
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@unique([campaignId, date])
+  @@map("campaign_insights")
+}
+
+model DailyInsight {
+  id          String   @id @default(cuid())
+  adAccountId String   @map("ad_account_id")
+  date        DateTime @db.Date
+  spend       Float    @default(0)
+  impressions Int      @default(0)
+  clicks      Int      @default(0)
+  conversions Float    @default(0)
+  roas        Float    @default(0)
+  cpc         Float    @default(0)
+  ctr         Float    @default(0)
+  cpm         Float    @default(0)
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  adAccount AdAccount @relation(fields: [adAccountId], references: [id], onDelete: Cascade)
+
+  @@unique([adAccountId, date])
+  @@map("daily_insights")
+}
+
+model AIRecommendation {
+  id              String               @id @default(cuid())
+  userId          String               @map("user_id")
+  campaignId      String?              @map("campaign_id")
+  type            RecommendationType
+  status          RecommendationStatus @default(PENDING)
+  confidence      Float
+  reasoningVi     String               @map("reasoning_vi") @db.Text
+  suggestedAction Json                 @map("suggested_action")
+  modelSource     String               @default("gemini") @map("model_source")
+  consensusData   Json?                @map("consensus_data")
+  appliedAt       DateTime?            @map("applied_at")
+  createdAt       DateTime             @default(now()) @map("created_at")
+
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  campaign Campaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+
+  @@map("ai_recommendations")
+}
+
+model AIChatMessage {
+  id              String   @id @default(cuid())
+  userId          String   @map("user_id")
+  model           String   @default("gemini")
+  role            String
+  content         String   @db.Text
+  contextSnapshot Json?    @map("context_snapshot")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("ai_chat_messages")
+}
+
+model AutomationRule {
+  id            String   @id @default(cuid())
+  userId        String   @map("user_id")
+  name          String
+  conditionJson Json     @map("condition_json")
+  actionJson    Json     @map("action_json")
+  isActive      Boolean  @default(true) @map("is_active")
+  isAutoPilot   Boolean  @default(false) @map("is_auto_pilot")
+  maxBudget     Float?   @map("max_budget")
+  lastTriggered DateTime? @map("last_triggered")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("automation_rules")
+}
+
+model Notification {
+  id        String              @id @default(cuid())
+  userId    String              @map("user_id")
+  type      String
+  channel   NotificationChannel @default(WEB)
+  title     String
+  message   String              @db.Text
+  payload   Json?
+  readAt    DateTime?           @map("read_at")
+  createdAt DateTime            @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("notifications")
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  userId     String?  @map("user_id")
+  action     String
+  entityType String   @map("entity_type")
+  entityId   String?  @map("entity_id")
+  beforeData Json?    @map("before_data")
+  afterData  Json?    @map("after_data")
+  ipAddress  String?  @map("ip_address")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@map("audit_logs")
+}
+
+model Report {
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id")
+  type      String
+  period    String
+  content   Json
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("reports")
+}

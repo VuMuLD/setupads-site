@@ -1,0 +1,21 @@
+{
+  "name": "fb-ads-manager",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "turbo dev",
+    "build": "turbo build",
+    "lint": "turbo lint",
+    "db:generate": "npm run db:generate --workspace=@fb-ads/web",
+    "db:push": "npm run db:push --workspace=@fb-ads/web",
+    "db:migrate": "npm run db:migrate --workspace=@fb-ads/web",
+    "db:studio": "npm run db:studio --workspace=@fb-ads/web"
+  },
+  "devDependencies": {
+    "turbo": "^2.3.3"
+  },
+  "packageManager": "npm@11.4.2"
+}
