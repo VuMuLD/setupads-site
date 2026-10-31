@@ -1,6 +1,12 @@
 import { prisma } from "@/lib/prisma";
 import { getProductAllImages } from "@/lib/messages/product-images";
-import { buildConsultingContext } from "@/lib/messages/consulting-flow";
+import {
+  buildConsultingContext,
+  getConsultingPlan,
+  getStageGuidance,
+  STAGE_LABELS,
+  type ConsultingStage,
+} from "@/lib/messages/consulting-flow";
 import {
   buildCustomerAiContext,
   getOrCreatePageCustomer,
@@ -20,6 +26,7 @@ export async function generateMessageAdvice(options: {
   userId: string;
   pageId: string;
   messageId: string;
+  stageOverride?: ConsultingStage;
 }) {
   const message = await prisma.pageMessage.findFirst({
     where: {
@@ -69,7 +76,16 @@ export async function generateMessageAdvice(options: {
     text: m.text,
     sentAt: m.sentAt,
   }));
-  const consulting = buildConsultingContext(flowMessages);
+  const baseConsulting = buildConsultingContext(flowMessages);
+  const consulting = options.stageOverride
+    ? {
+        ...baseConsulting,
+        stage: options.stageOverride,
+        stageLabel: STAGE_LABELS[options.stageOverride],
+        guidance: getStageGuidance(options.stageOverride),
+        plan: getConsultingPlan(options.stageOverride),
+      }
+    : baseConsulting;
 
   const conv = message.conversation;
   if (conv.participantFbId) {
