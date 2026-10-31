@@ -1,7 +1,7 @@
 import os
 import json
 from typing import Optional
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
@@ -168,6 +168,9 @@ async def message_advice(request: MessageAdviceRequest):
     )
     result = await consensus_engine.analyze(prompt, model="gemini")
     raw = result.get("response", "")
+    head = raw.lstrip()[:80]
+    if head.startswith("Lỗi ") or "chưa được cấu hình" in head or "API key" in head:
+        raise HTTPException(status_code=502, detail=f"AI provider error: {raw[:200]}")
     parsed = parse_message_advice(raw)
     return {
         "reply": parsed.get("reply", raw[:500]),
