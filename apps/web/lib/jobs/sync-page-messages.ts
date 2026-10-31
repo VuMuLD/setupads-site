@@ -43,6 +43,34 @@ async function autoReplyToInbound(
   });
   if (alreadyReplied) return false;
 
+  // Chặn trả lời trùng: khách gửi lại đúng nội dung vừa được AI trả lời trong vòng
+  // 3 phút (chạm đúp, bấm lại nút đặt mua từ quảng cáo) thì bỏ qua, tránh bot lặp y hệt.
+  const normalizedText = message.text.trim().toLowerCase();
+  if (normalizedText && normalizedText !== "[đính kèm]") {
+    const windowStart = new Date(message.sentAt.getTime() - 3 * 60 * 1000);
+    const windowEnd = new Date(message.sentAt.getTime() + 3 * 60 * 1000);
+    const answeredSiblings = await prisma.pageMessage.findMany({
+      where: {
+        conversationId,
+        direction: "INBOUND",
+        id: { not: message.id },
+        sentAt: { gte: windowStart, lte: windowEnd },
+        aiSuggestedReply: { not: null },
+      },
+      select: { text: true },
+    });
+    if (
+      answeredSiblings.some(
+        (sibling) => sibling.text.trim().toLowerCase() === normalizedText
+      )
+    ) {
+      console.info(
+        `[syncPageMessages] Bỏ qua tin trùng nội dung đã trả lời cho page ${page.id}`
+      );
+      return false;
+    }
+  }
+
   const advice = await generateMessageAdvice({
     userId,
     pageId: page.id,
