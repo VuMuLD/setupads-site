@@ -13,6 +13,9 @@ export type ConsultingStage =
   | "objection"
   | "closing"
   | "follow_up"
+  | "follow_up_value"
+  | "follow_up_offer"
+  | "follow_up_final"
   | "purchased";
 
 const PRICE_ASK_PATTERN =
@@ -34,6 +37,9 @@ export const STAGE_LABELS: Record<ConsultingStage, string> = {
   objection: "Xử lý lo ngại",
   closing: "Chốt đơn",
   follow_up: "Theo dõi",
+  follow_up_value: "Theo dõi — thêm giá trị",
+  follow_up_offer: "Theo dõi — chốt mềm",
+  follow_up_final: "Theo dõi — tin cuối",
   purchased: "Đã mua",
 };
 
@@ -110,6 +116,24 @@ export function getConsultingPlan(stage: ConsultingStage): string {
       "2. Hỏi khách còn thắc mắc gì không",
       "3. Gợi ý ưu đãi / còn hàng (nếu phù hợp)",
     ].join("\n"),
+    follow_up_value: [
+      "1. Khách đã im lặng vài giờ — mở đầu tự nhiên, nhắc lại điểm khách từng quan tâm",
+      "2. TẶNG thêm 1 thông tin hữu ích cụ thể về sản phẩm mà khách chưa biết (chất liệu, cách dùng, cách kiểm tra hàng...)",
+      "3. Kết bằng 1 câu hỏi nhẹ, dễ trả lời",
+      "4. KHÔNG nhắc lại nguyên văn tin trước, KHÔNG ép mua",
+    ].join("\n"),
+    follow_up_offer: [
+      "1. Khách im lặng nửa ngày — tóm gọn lại đề nghị: giá + freeship",
+      "2. Hạ rào cản: COD kiểm tra hàng ưng mới trả tiền, đổi trả dễ, bảo hành rõ ràng",
+      "3. Hỏi chốt nhẹ 1 câu (VD: em giữ 1 bộ cho mình nhé?)",
+      "4. Không dọa hết hàng, không giục giã",
+    ].join("\n"),
+    follow_up_final: [
+      "1. Đây là tin chăm sóc CUỐI — lịch sự khép lại, để khách thật thoải mái",
+      "2. Nhắc ngắn: shop luôn sẵn hàng và giữ ưu đãi khi khách quay lại",
+      "3. Cảm ơn khách đã quan tâm + để cửa mở (khi nào cần cứ nhắn em)",
+      "4. TUYỆT ĐỐI không ép chốt, không hỏi xin thông tin",
+    ].join("\n"),
     purchased: [
       "1. Cảm ơn khách đã tin tưởng",
       "2. Xác nhận đơn, thời gian giao dự kiến",
@@ -133,6 +157,12 @@ export function getStageGuidance(stage: ConsultingStage): string {
       "Khách sắp mua. Hướng dẫn đặt hàng rõ ràng, hỏi thông tin giao hàng. Đừng hỏi lan man.",
     follow_up:
       "Khách chưa trả lời sau tư vấn. Nhắc nhẹ, không ép. Hỏi còn thắc mắc gì không.",
+    follow_up_value:
+      "Khách im lặng vài giờ sau tư vấn. Đừng nhắc lại y nguyên — hãy TẶNG thêm một thông tin có ích về sản phẩm để khách có lý do quay lại. Ngắn, thân thiện, không ép mua.",
+    follow_up_offer:
+      "Khách im lặng nửa ngày. Đây là lần gợi ý mua rõ ràng nhất trong chuỗi chăm sóc: nhắc giá tốt + freeship + kiểm tra hàng trước khi trả tiền. Vẫn ngắn gọn, thân thiện, không giục giã, không dọa hết hàng.",
+    follow_up_final:
+      "Tin nhắn cuối trong chuỗi chăm sóc (sắp hết cửa sổ 24h của Messenger). Tuyệt đối không ép chốt. Lịch sự, để lại ấn tượng tốt và lời mời mở để khách quay lại bất cứ lúc nào.",
     purchased:
       "Khách đã đặt/mua. Cảm ơn, xác nhận đơn. Không tư vấn bán thêm trừ khi khách hỏi.",
   };

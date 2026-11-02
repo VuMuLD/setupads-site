@@ -3,10 +3,34 @@ import { prisma } from "@/lib/prisma";
 import { generateMessageAdvice } from "@/lib/ai/message-advisor";
 import { sendConversationReply } from "@/lib/messages/send-page-reply";
 import { isFacebookAppRateLimited } from "@/lib/facebook/rate-limit";
+import type { ConsultingStage } from "@/lib/messages/consulting-flow";
 
-const SILENCE_MS = 60 * 60 * 1000; // khách im lặng >= 1 giờ mới nhắc
-const WINDOW_MS = 23 * 60 * 60 * 1000; // chỉ nhắc trong cửa sổ 24h của Facebook
+/**
+ * Chuỗi chăm sóc khách im lặng chuẩn sale chuyên nghiệp — 4 chạm trong cửa sổ
+ * 24h của Messenger (tính từ tin khách gần nhất):
+ *   Bước 1 (+1h im lặng): nhắc nhẹ, không ép
+ *   Bước 2 (+3h sau bước 1): tặng thêm 1 thông tin giá trị về sản phẩm
+ *   Bước 3 (+6h sau bước 2): chốt mềm — giá + freeship + COD kiểm tra hàng
+ *   Bước 4 (+10h sau bước 3): tin cuối lịch sự, để cửa mở, không ép nữa
+ * Khách trả lời là chuỗi dừng ngay (neo theo tin khách mới). Giờ yên tĩnh theo
+ * giờ Sài Gòn: bước 1 chỉ gửi 08:00–22:30, các bước sau 08:00–21:30.
+ */
+const WINDOW_MS = 23 * 60 * 60 * 1000; // cửa sổ nhắn tin 24h của Facebook
 const MAX_PER_PAGE_PER_RUN = 5;
+const HOUR_MS = 60 * 60 * 1000;
+
+const STEPS: Array<{
+  step: number;
+  minSilenceMs: number;
+  stage: ConsultingStage;
+  quietStart: number; // giờ Sài Gòn được phép bắt đầu gửi
+  quietEnd: number; // giờ Sài Gòn phải dừng gửi
+}> = [
+  { step: 1, minSilenceMs: 1 * HOUR_MS, stage: "follow_up", quietStart: 8, quietEnd: 22.5 },
+  { step: 2, minSilenceMs: 3 * HOUR_MS, stage: "follow_up_value", quietStart: 8, quietEnd: 21.5 },
+  { step: 3, minSilenceMs: 6 * HOUR_MS, stage: "follow_up_offer", quietStart: 8, quietEnd: 21.5 },
+  { step: 4, minSilenceMs: 10 * HOUR_MS, stage: "follow_up_final", quietStart: 8, quietEnd: 21.5 },
+];
 
 let tableReady = false;
 
@@ -17,17 +41,43 @@ async function ensureNudgeTable() {
        id VARCHAR(191) NOT NULL,
        conversation_id VARCHAR(191) NOT NULL,
        anchor_message_id VARCHAR(191) NOT NULL,
+       step INT NOT NULL DEFAULT 1,
        nudged_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
        PRIMARY KEY (id),
-       UNIQUE KEY uq_nudge_episode (conversation_id, anchor_message_id),
+       UNIQUE KEY uq_nudge_episode (conversation_id, anchor_message_id, step),
        KEY idx_nudge_conversation (conversation_id)
      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
   );
+  // Bảng cũ (bản 1 chạm) chưa có cột step → bổ sung + nới unique key theo step
+  const cols = await prisma.$queryRawUnsafe<Array<{ c: number }>>(
+    `SELECT COUNT(*) AS c FROM INFORMATION_SCHEMA.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'page_conversation_nudges' AND COLUMN_NAME = 'step'`
+  );
+  if (Number(cols[0]?.c ?? 0) === 0) {
+    await prisma.$executeRawUnsafe(
+      `ALTER TABLE page_conversation_nudges
+         ADD COLUMN step INT NOT NULL DEFAULT 1,
+         DROP INDEX uq_nudge_episode,
+         ADD UNIQUE KEY uq_nudge_episode (conversation_id, anchor_message_id, step)`
+    );
+  }
   tableReady = true;
 }
 
 function normalizeText(text: string): string {
   return text.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function saigonHourFloat(now: Date): number {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Saigon",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(now);
+  const h = Number(parts.find((p) => p.type === "hour")?.value || 0);
+  const m = Number(parts.find((p) => p.type === "minute")?.value || 0);
+  return h + m / 60;
 }
 
 export async function runFollowUpNudges() {
@@ -65,7 +115,7 @@ async function processPage(page: {
     where: {
       pageId: page.id,
       lastMessageAt: {
-        lte: new Date(now - SILENCE_MS),
+        lte: new Date(now - 1 * HOUR_MS),
         gte: new Date(now - WINDOW_MS),
       },
     },
@@ -83,7 +133,7 @@ async function processPage(page: {
     }
   }
   if (sent > 0) {
-    console.log(`[follow-up] Page ${page.id}: đã nhắc ${sent} khách`);
+    console.log(`[follow-up] Page ${page.id}: đã chăm sóc ${sent} khách`);
   }
 }
 
@@ -108,37 +158,61 @@ async function maybeNudge(
     return false;
   }
 
-  // Tin shop cuối phải do chính bot gửi (sát thời điểm AI trả lời),
-  // nếu nhân viên đã chat tay sau đó thì không chen vào.
-  const delta = last.sentAt.getTime() - lastInbound.aiReplyAt.getTime();
-  if (delta < -15_000 || delta > 5 * 60 * 1000) return false;
+  const now = Date.now();
 
-  // Đã chốt đơn từ hội thoại này thì không nhắc nữa
+  // Mọi chạm phải nằm trong cửa sổ 24h tính từ tin khách gần nhất
+  if (now - lastInbound.sentAt.getTime() > WINDOW_MS) return false;
+
+  // Các bước đã gửi cho lượt im lặng này (neo theo tin khách gần nhất)
+  const sentSteps = await prisma.$queryRawUnsafe<
+    Array<{ step: number; nudged_at: Date }>
+  >(
+    "SELECT step, nudged_at FROM page_conversation_nudges WHERE conversation_id = ? AND anchor_message_id = ? ORDER BY step ASC",
+    conv.id,
+    lastInbound.id
+  );
+  const nextStep = (sentSteps.length ? Math.max(...sentSteps.map((r) => Number(r.step))) : 0) + 1;
+  const stepCfg = STEPS.find((s) => s.step === nextStep);
+  if (!stepCfg) return false; // đã đủ 4 chạm
+
+  // Đủ thời gian im lặng kể từ tin shop cuối chưa
+  if (now - last.sentAt.getTime() < stepCfg.minSilenceMs) return false;
+
+  // Tin shop cuối phải do chính bot gửi:
+  // - bước 1: sát thời điểm AI trả lời tin khách
+  // - bước sau: sát thời điểm tin chăm sóc trước (nếu nhân viên đã chat tay thì không chen vào)
+  if (nextStep === 1) {
+    const delta = last.sentAt.getTime() - lastInbound.aiReplyAt.getTime();
+    if (delta < -15_000 || delta > 5 * 60 * 1000) return false;
+  } else {
+    const prev = sentSteps[sentSteps.length - 1];
+    const prevAt = new Date(prev.nudged_at).getTime();
+    const delta = last.sentAt.getTime() - prevAt;
+    if (delta < -5 * 60 * 1000 || delta > 60_000) return false;
+  }
+
+  // Giờ yên tĩnh (giờ Sài Gòn)
+  const hour = saigonHourFloat(new Date(now));
+  if (hour < stepCfg.quietStart || hour >= stepCfg.quietEnd) return false;
+
+  // Đã chốt đơn từ hội thoại này thì không chăm sóc nữa
   const order = await prisma.pageCustomerOrder.findFirst({
     where: { conversationId: conv.id },
     select: { id: true },
   });
   if (order) return false;
 
-  // Mỗi lượt im lặng chỉ nhắc 1 lần (neo theo tin khách gần nhất)
-  const existing = await prisma.$queryRawUnsafe<Array<{ id: string }>>(
-    "SELECT id FROM page_conversation_nudges WHERE conversation_id = ? AND anchor_message_id = ? LIMIT 1",
-    conv.id,
-    lastInbound.id
-  );
-  if (existing.length > 0) return false;
-
-  // Soạn tin nhắc bằng chính bộ não tư vấn, ép stage follow_up (nhắc nhẹ, không ép)
+  // Soạn tin bằng chính bộ não tư vấn, theo góc của từng bước
   const advice = await generateMessageAdvice({
     userId: page.facebookAccount.userId,
     pageId: page.id,
     messageId: lastInbound.id,
-    stageOverride: "follow_up",
+    stageOverride: stepCfg.stage,
   });
   const text = (advice.reply || "").trim();
   if (!text) return false;
 
-  // Chống lặp: tin nhắc trùng y hệt tin bot vừa gửi thì bỏ qua
+  // Chống lặp: tin chăm sóc trùng y hệt tin shop vừa gửi thì bỏ qua
   if (normalizeText(text) === normalizeText(last.text)) return false;
 
   await sendConversationReply({
@@ -148,14 +222,15 @@ async function maybeNudge(
   });
 
   await prisma.$executeRawUnsafe(
-    "INSERT INTO page_conversation_nudges (id, conversation_id, anchor_message_id) VALUES (?, ?, ?)",
+    "INSERT INTO page_conversation_nudges (id, conversation_id, anchor_message_id, step) VALUES (?, ?, ?, ?)",
     randomUUID(),
     conv.id,
-    lastInbound.id
+    lastInbound.id,
+    nextStep
   );
 
   console.log(
-    `[follow-up] Đã nhắc khách ${conv.participantName || conv.id} (page ${page.id})`
+    `[follow-up] Đã chăm sóc bước ${nextStep}/4 khách ${conv.participantName || conv.id} (page ${page.id})`
   );
   return true;
 }
