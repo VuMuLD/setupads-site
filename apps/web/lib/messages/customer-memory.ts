@@ -333,14 +333,33 @@ export async function buildCustomerAiContext(options: {
   });
 
   const stage = options.consultingStage || consulting.stage;
-  const learnings = await prisma.pageCustomerLearning.findMany({
-    where: {
-      pageId: options.pageId,
-      OR: [{ stage }, { category: "success_pattern" }],
-    },
-    orderBy: [{ useCount: "desc" }, { createdAt: "desc" }],
-    take: 8,
-  });
+  const [learnings, avoidLearnings] = await Promise.all([
+    prisma.pageCustomerLearning.findMany({
+      where: {
+        pageId: options.pageId,
+        OR: [{ stage }, { category: "success_pattern" }],
+      },
+      orderBy: [{ useCount: "desc" }, { createdAt: "desc" }],
+      take: 8,
+    }),
+    prisma.pageCustomerLearning.findMany({
+      where: { pageId: options.pageId, category: "avoid_pattern" },
+      orderBy: [{ useCount: "desc" }, { createdAt: "desc" }],
+      take: 2,
+    }),
+  ]);
+
+  // Học tăng cường: bài học nào được dùng trong prompt thì tăng useCount,
+  // để mẫu nào thật sự hiệu quả sẽ nổi lên đầu theo thời gian.
+  const usedLearningIds = [...learnings, ...avoidLearnings].map((l) => l.id);
+  if (usedLearningIds.length) {
+    void prisma.pageCustomerLearning
+      .updateMany({
+        where: { id: { in: usedLearningIds } },
+        data: { useCount: { increment: 1 } },
+      })
+      .catch(() => undefined);
+  }
 
   const pageInsights = Array.isArray(page?.aiConsultingInsights)
     ? (page!.aiConsultingInsights as Array<{ stage?: string; tip: string }>)
@@ -350,6 +369,12 @@ export async function buildCustomerAiContext(options: {
 
   const pageLearnings = [
     ...learnings.map((l) => ({
+      category: l.category,
+      insight: l.insight,
+      effectiveReply: l.effectiveReply,
+      stage: l.stage,
+    })),
+    ...avoidLearnings.map((l) => ({
       category: l.category,
       insight: l.insight,
       effectiveReply: l.effectiveReply,

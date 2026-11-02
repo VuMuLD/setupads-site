@@ -223,6 +223,68 @@ export async function learnFromConversation(
   return { learned: true };
 }
 
+/** Phân tích hội thoại mất khách → lưu bài học dạng avoid_pattern */
+export async function analyzeLostConversation(
+  conversationId: string
+): Promise<boolean> {
+  const data = await ensureCustomerForConversation(conversationId);
+  if (!data) return false;
+
+  const { conversation, customer, flowMessages } = data;
+  const consulting = buildConsultingContext(flowMessages);
+  const history = conversation.messages.map((m) => ({
+    role: m.direction === "INBOUND" ? "customer" : "page",
+    text: m.text,
+    aiSuggested: Boolean(m.aiSuggestedReply),
+  }));
+
+  try {
+    const res = await fetch(`${AI_SERVICE_URL}/analyze-lost-conversation`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        pageName: (
+          await prisma.page.findUnique({
+            where: { id: conversation.pageId },
+            select: { name: true },
+          })
+        )?.name,
+        participantName: customer.participantName,
+        conversationHistory: history,
+        language: "vi",
+      }),
+    });
+    if (!res.ok) return false;
+    const aiResult = (await res.json()) as {
+      insights?: Array<{
+        insight: string;
+        effectiveReply?: string;
+        stage?: string;
+      }>;
+    };
+    const insights = (aiResult.insights || []).filter((i) => i.insight).slice(0, 2);
+    if (!insights.length) return false;
+    for (const ins of insights) {
+      await prisma.pageCustomerLearning.create({
+        data: {
+          pageId: conversation.pageId,
+          customerId: customer.id,
+          conversationId: conversation.id,
+          category: "avoid_pattern",
+          insight: ins.insight,
+          effectiveReply: ins.effectiveReply || null,
+          stage: ins.stage || consulting.stage,
+          outcome: "lost",
+        },
+      });
+    }
+    return true;
+  } catch (err) {
+    console.error("[analyzeLostConversation]", err);
+    return false;
+  }
+}
+
 /** Đồng bộ hồ sơ khách sau mỗi tương tác AI */
 export async function touchCustomerFromConversation(conversationId: string) {
   try {

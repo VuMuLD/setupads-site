@@ -152,13 +152,24 @@ BỘ NHỚ KHÁCH HÀNG (dùng để cá nhân hóa — đừng hỏi lại thô
 
     learnings_block = ""
     if page_learnings:
-        tips = []
-        for item in page_learnings[:6]:
-            tip = item.get("insight", "")
-            if item.get("effectiveReply"):
-                tip += f" (mẫu trả lời hiệu quả: {item.get('effectiveReply')[:120]})"
-            tips.append(f"- {tip}")
-        learnings_block = "\nKINH NGHIỆM TỪ KHÁCH TRƯỚC (áp dụng nếu phù hợp):\n" + "\n".join(tips)
+        good_items = [i for i in page_learnings if i.get("category") != "avoid_pattern"][:5]
+        avoid_items = [i for i in page_learnings if i.get("category") == "avoid_pattern"][:2]
+        if good_items:
+            tips = []
+            for item in good_items:
+                tip = item.get("insight", "")
+                if item.get("effectiveReply"):
+                    tip += f" (mẫu trả lời hiệu quả: {item.get('effectiveReply')[:120]})"
+                tips.append(f"- {tip}")
+            learnings_block = "\nKINH NGHIỆM TỪ KHÁCH TRƯỚC (áp dụng nếu phù hợp):\n" + "\n".join(tips)
+        if avoid_items:
+            lines = []
+            for item in avoid_items:
+                line = f"- {item.get('insight', '')}"
+                if item.get("effectiveReply"):
+                    line += f" → nên trả lời kiểu: {item.get('effectiveReply')[:120]}"
+                lines.append(line)
+            learnings_block += "\nĐIỀU CẦN TRÁNH (rút từ hội thoại từng mất khách):\n" + "\n".join(lines)
 
     return f"""Bạn là nhân viên tư vấn bán hàng qua Messenger của Facebook Page "{page_name}".
 Bạn am hiểu tâm lý khách Việt: thân thiện, không ép mua, biết hỏi đúng lúc để dẫn khách đến chốt đơn.
@@ -367,3 +378,43 @@ Yêu cầu bài viết:
 - Cuối cùng thêm 3-5 hashtag liên quan (ví dụ #dogiadung #tên sản phẩm viết liền).
 - Độ dài 120-220 từ, câu ngắn, dễ đọc trên điện thoại, tối đa 1-2 emoji.
 - Chỉ trả về đúng nội dung bài đăng, không giải thích, không thêm tiêu đề kiểu "Bài viết:"."""
+
+
+def get_lost_conversation_prompt(
+    page_name: str,
+    participant_name: str,
+    conversation_history: list,
+    language: str = "vi",
+) -> str:
+    lang = "tiếng Việt" if language == "vi" else "English"
+    history_str = ""
+    for msg in conversation_history[-24:]:
+        role = "Khách" if msg.get("role") == "customer" else "Page"
+        ai = " [AI]" if msg.get("aiSuggested") else ""
+        history_str += f"{role}{ai}: {msg.get('text', '')}\n"
+
+    return f"""Bạn là huấn luyện viên bán hàng, phân tích một hội thoại Messenger của Page "{page_name}" mà khách ĐÃ IM LẶNG / KHÔNG CHỐT (Page nhắn cuối, khách không trả lời nữa).
+
+NGÔN NGỮ: {lang}
+KHÁCH: {participant_name or 'Khách'}
+
+HỘI THOẠI:
+{history_str or "(trống)"}
+
+NHIỆM VỤ:
+1. Xác định điểm hội thoại "chết": câu trả lời nào của Page làm khách mất hứng, và vì sao (trả lời quá dài, không đúng điều khách hỏi, lặp thông tin, ép chốt quá sớm, thiếu câu hỏi móc nối kéo tiếp, giọng điệu không phù hợp...).
+2. Rút 1-2 bài học dạng "ĐIỀU CẦN TRÁNH" thật cụ thể, kèm câu trả lời thay thế nên dùng — câu thay thế phải NGẮN (1-2 câu), đúng trọng tâm, và kết bằng đúng 1 câu hỏi móc nối dễ trả lời.
+3. Chỉ phân tích phía Page (cả nhân viên lẫn AI đều là "Page"), không đổ lỗi cho khách. Nếu hội thoại chết vì lý do khách quan (khách chỉ hỏi tham khảo, hết nhu cầu) thì trả về insights rỗng.
+
+Trả về ĐÚNG JSON (không markdown fence):
+{{
+  "insights": [
+    {{
+      "category": "avoid_pattern",
+      "insight": "bài học ngắn: tránh làm gì + vì sao mất khách",
+      "effectiveReply": "câu trả lời thay thế nên dùng trong tình huống đó",
+      "stage": "discovery|recommendation|objection|closing|follow_up",
+      "outcome": "lost"
+    }}
+  ]
+}}"""

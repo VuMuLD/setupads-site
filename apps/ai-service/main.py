@@ -17,6 +17,7 @@ from prompts.templates import (
     get_weekly_prompt,
     get_message_advice_prompt,
     get_post_prompt,
+    get_lost_conversation_prompt,
     get_old_customer_message_prompt,
     get_learn_from_conversation_prompt,
 )
@@ -204,6 +205,30 @@ async def write_post(request: WritePostRequest):
     if raw.startswith("Lỗi ") or "chưa được cấu hình" in head or "API key" in head:
         raise HTTPException(status_code=502, detail=f"AI provider error: {raw[:200]}")
     return {"content": raw, "model": result.get("model", "gemini")}
+
+
+class LostConversationRequest(BaseModel):
+    pageName: str
+    participantName: str = ""
+    conversationHistory: list = []
+    language: str = "vi"
+
+
+@app.post("/analyze-lost-conversation")
+async def analyze_lost_conversation(request: LostConversationRequest):
+    prompt = get_lost_conversation_prompt(
+        request.pageName,
+        request.participantName,
+        request.conversationHistory,
+        request.language,
+    )
+    result = await consensus_engine.analyze(prompt, model="gemini")
+    raw = (result.get("response", "") or "").strip()
+    head = raw[:80]
+    if raw.startswith("Lỗi ") or "chưa được cấu hình" in head or "API key" in head:
+        raise HTTPException(status_code=502, detail=f"AI provider error: {raw[:200]}")
+    parsed = parse_learn_from_conversation(raw)
+    return {**parsed, "model": result.get("model", "gemini")}
 
 
 @app.post("/learn-from-conversation")
