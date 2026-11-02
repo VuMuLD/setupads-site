@@ -370,6 +370,27 @@ export class FacebookGraphClient {
     );
   }
 
+  async uploadPagePhoto(
+    pageId: string,
+    imageUrl: string
+  ): Promise<{ id: string }> {
+    return this.request<{ id: string }>(`${pageId}/photos`, {
+      method: "POST",
+      body: JSON.stringify({ url: imageUrl, published: false }),
+    });
+  }
+
+  async createPageFeedPost(
+    pageId: string,
+    message: string,
+    attachedMedia: Array<{ media_fbid: string }> = []
+  ): Promise<{ id: string }> {
+    return this.request<{ id: string }>(`${pageId}/feed`, {
+      method: "POST",
+      body: JSON.stringify({ message, attached_media: attachedMedia }),
+    });
+  }
+
   async getPageConversations(
     pageId: string,
     pageTokenKey: string,

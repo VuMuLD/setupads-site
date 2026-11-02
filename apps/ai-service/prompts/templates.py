@@ -329,3 +329,41 @@ Trả về ĐÚNG JSON (không markdown fence):
   "name": "tên ngắn cho mẫu tin này",
   "text": "nội dung tin nhắn với {{name}} và {{pageName}} làm placeholder"
 }}"""
+
+
+ANGLE_GUIDES = {
+    "gioi_thieu": "Giới thiệu sản phẩm: nêu vấn đề khách hay gặp, rồi giới thiệu sản phẩm như giải pháp, điểm nổi bật nhất.",
+    "uu_dai": "Ưu đãi: nhấn mạnh giá ưu đãi so với giá gốc và miễn phí ship (nếu mô tả có ghi), tạo cảm giác đáng mua nhưng không bịa khan hiếm hay đếm ngược giả.",
+    "tinh_nang": "Tính năng: đi sâu vào các tính năng/thông số hữu ích nhất, dịch thông số thành lợi ích thực tế khi dùng.",
+    "meo_dung": "Mẹo sử dụng: chia sẻ 2-3 mẹo dùng/vệ sinh sản phẩm hữu ích, lồng ghép giới thiệu sản phẩm nhẹ nhàng ở cuối.",
+    "hoi_dap": "Hỏi đáp: mở đầu bằng 1-2 câu hỏi khách hay hỏi nhất về sản phẩm, trả lời ngắn gọn, kết bằng lời mời inbox để tư vấn thêm.",
+}
+
+
+def get_post_prompt(
+    page_name: str,
+    product: dict,
+    angle: str = "gioi_thieu",
+    language: str = "vi",
+) -> str:
+    import json
+
+    angle_guide = ANGLE_GUIDES.get(angle, ANGLE_GUIDES["gioi_thieu"])
+    product_str = json.dumps(product or {}, ensure_ascii=False, indent=2)
+    return f"""Bạn là người viết bài bán hàng cho fanpage Facebook "{page_name}".
+
+Hãy viết 1 bài đăng Facebook hoàn chỉnh về sản phẩm dưới đây.
+Góc nội dung: {angle_guide}
+
+DỮ LIỆU SẢN PHẨM (chỉ dùng dữ kiện này, KHÔNG bịa thêm thông số/giá/chính sách):
+{product_str}
+
+Yêu cầu bài viết:
+- Xưng hô kiểu shop: "bên em", gọi khách "anh/chị" hoặc "mình" tự nhiên.
+- Câu mở đầu phải cuốn hút (hook) ngay dòng đầu.
+- Thân bài: các ý lợi ích/tính năng viết dạng ✅, mỗi ý 1 dòng ngắn.
+- Có giá bán (và giá gốc nếu dữ liệu có) + ưu đãi ship nếu mô tả sản phẩm có ghi.
+- Kết bài: kêu gọi inbox/nhắn tin để được tư vấn và đặt hàng.
+- Cuối cùng thêm 3-5 hashtag liên quan (ví dụ #dogiadung #tên sản phẩm viết liền).
+- Độ dài 120-220 từ, câu ngắn, dễ đọc trên điện thoại, tối đa 1-2 emoji.
+- Chỉ trả về đúng nội dung bài đăng, không giải thích, không thêm tiêu đề kiểu "Bài viết:"."""

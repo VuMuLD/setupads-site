@@ -63,6 +63,7 @@ export const FB_ADS_SCOPES = [
   "pages_show_list",
   "pages_read_engagement",
   "pages_manage_metadata",
+  "pages_manage_posts",
   "pages_messaging",
   "business_management",
 ].join(",");
@@ -71,6 +72,7 @@ export const FB_MESSAGING_SCOPES = [
   "pages_show_list",
   "pages_read_engagement",
   "pages_manage_metadata",
+  "pages_manage_posts",
   "pages_messaging",
   "business_management",
 ].join(",");

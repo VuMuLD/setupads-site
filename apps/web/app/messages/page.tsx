@@ -12,6 +12,7 @@ import {
   Loader2,
   MessageCircle,
   Megaphone,
+  PenLine,
   RefreshCw,
   Send,
   Sparkles,
@@ -704,6 +705,14 @@ export default function MessagesPage() {
               >
                 <Megaphone className="mr-2 h-4 w-4" />
                 Gửi khách cũ
+              </Button>
+            )}
+            {selectedPageId && (
+              <Button variant="outline" size="sm" asChild>
+                <Link href={`/pages/${selectedPageId}/posts`}>
+                  <PenLine className="mr-2 h-4 w-4" />
+                  Đăng bài
+                </Link>
               </Button>
             )}
           </div>

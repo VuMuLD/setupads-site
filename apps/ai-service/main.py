@@ -16,6 +16,7 @@ from prompts.templates import (
     get_chat_prompt,
     get_weekly_prompt,
     get_message_advice_prompt,
+    get_post_prompt,
     get_old_customer_message_prompt,
     get_learn_from_conversation_prompt,
 )
@@ -58,6 +59,13 @@ class ChatRequest(BaseModel):
     context: dict = {}
     language: str = "vi"
     history: list = []
+
+
+class WritePostRequest(BaseModel):
+    pageName: str
+    product: dict = {}
+    angle: str = "gioi_thieu"
+    language: str = "vi"
 
 
 class MessageAdviceRequest(BaseModel):
@@ -180,6 +188,22 @@ async def message_advice(request: MessageAdviceRequest):
         "sendCustomerPhotos": parsed.get("sendCustomerPhotos", []),
         "model": result.get("model", "gemini"),
     }
+
+
+@app.post("/write-post")
+async def write_post(request: WritePostRequest):
+    prompt = get_post_prompt(
+        request.pageName,
+        request.product,
+        request.angle,
+        request.language,
+    )
+    result = await consensus_engine.analyze(prompt, model="gemini")
+    raw = (result.get("response", "") or "").strip()
+    head = raw[:80]
+    if raw.startswith("Lỗi ") or "chưa được cấu hình" in head or "API key" in head:
+        raise HTTPException(status_code=502, detail=f"AI provider error: {raw[:200]}")
+    return {"content": raw, "model": result.get("model", "gemini")}
 
 
 @app.post("/learn-from-conversation")

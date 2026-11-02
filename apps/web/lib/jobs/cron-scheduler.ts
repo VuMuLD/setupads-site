@@ -4,6 +4,7 @@ import { decrypt } from "@/lib/crypto/token-encryption";
 import { syncAdAccountData } from "@/lib/jobs/sync-data";
 import { syncPageMessages } from "@/lib/jobs/sync-page-messages";
 import { runFollowUpNudges } from "@/lib/jobs/follow-up-nudge";
+import { runScheduledPosts } from "@/lib/jobs/post-scheduler";
 import { evaluateAutomationRules } from "@/lib/jobs/rules-engine";
 import { createNotification } from "@/lib/notifications/notification-service";
 import { isFacebookAppRateLimited } from "@/lib/facebook/rate-limit";
@@ -50,8 +51,12 @@ export function initCronJobs() {
     await runFollowUpNudges();
   });
 
+  cron.schedule("*/5 * * * *", async () => {
+    await runScheduledPosts();
+  });
+
   console.log(
-    `[Cron] Jobs scheduled: sync(6h), messages(${MESSAGE_SYNC_CRON}), daily(7AM), weekly(Mon 7AM), cleanup(2AM), followup(10m)`
+    `[Cron] Jobs scheduled: sync(6h), messages(${MESSAGE_SYNC_CRON}), daily(7AM), weekly(Mon 7AM), cleanup(2AM), followup(10m), posts(5m)`
   );
 }
 
