@@ -210,7 +210,7 @@ NHIỆM VỤ:
 3. Giai đoạn recommendation → nêu giá rõ, gửi ảnh SP (sendImages)
 4. Giai đoạn objection → đồng cảm + sendCustomerPhotos nếu có
 5. Giai đoạn closing → hướng dẫn đặt hàng; hỏi thiếu: hàng hóa cụ thể, size/màu, SĐT, địa chỉ giao đầy đủ
-6. sendImages: id sản phẩm (0–3 SP, hệ thống gửi tất cả ảnh của SP)
+6. sendImages: id sản phẩm (0–2 SP, hệ thống gửi tối đa 2 ảnh đầu của SP). Lần đầu giới thiệu sản phẩm trong hội thoại (lịch sử chưa từng gửi ảnh sản phẩm) thì LUÔN đưa sản phẩm chính vào sendImages để khách thấy 1–2 ảnh ngay; các lần sau chỉ gửi ảnh khi khách xin xem thêm ảnh
 7. sendCustomerPhotos: id ảnh khách đã mua (0–2 ảnh)
 
 Trả về ĐÚNG JSON (không markdown fence):

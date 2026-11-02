@@ -5,7 +5,10 @@ import {
   MessagingPermissionError,
   refreshPageTokens,
 } from "@/lib/facebook/messaging-access";
-import { FACEBOOK_RATE_LIMIT_MESSAGE } from "@/lib/facebook/rate-limit";
+import {
+  FACEBOOK_RATE_LIMIT_MESSAGE,
+  isFacebookRateLimitError,
+} from "@/lib/facebook/rate-limit";
 import { prisma } from "@/lib/prisma";
 import { decrypt } from "@/lib/crypto/token-encryption";
 import { generateMessageAdvice } from "@/lib/ai/message-advisor";
@@ -25,6 +28,41 @@ export const SYNC_RECENT_MESSAGES_PER_CONV = 20;
 export const SYNC_FULL_MAX_MESSAGES = 400;
 export const SYNC_FULL_CONV_BATCH = 25;
 export const SYNC_FULL_MESSAGES_PER_CONV = 30;
+
+// --- Rate limit theo tung Page: cooldown luu DB + backoff tang dan ---
+// Khi 1 Page bi Facebook (hoac bo gioi han noi bo cua graph-client) chan
+// do rate limit, ghi nhan de cac vong dong bo sau bo qua Page do cho den
+// khi het cooldown, thay vi cu 5 phut lai goi va loi lai nhu cu.
+const RATE_LIMIT_BASE_MINUTES = 30;
+const RATE_LIMIT_MAX_MINUTES = 240;
+
+function isRateLimitError(err: unknown): boolean {
+  return (
+    isFacebookRateLimitError(err) ||
+    (err instanceof Error && /rate limit/i.test(err.message))
+  );
+}
+
+async function recordPageRateLimit(
+  pageId: string,
+  currentStrikes: number
+): Promise<number> {
+  const strikes = currentStrikes + 1;
+  const minutes = Math.min(
+    RATE_LIMIT_BASE_MINUTES * 2 ** (strikes - 1),
+    RATE_LIMIT_MAX_MINUTES
+  );
+  await prisma.page
+    .update({
+      where: { id: pageId },
+      data: {
+        rateLimitStrikes: strikes,
+        rateLimitUntil: new Date(Date.now() + minutes * 60 * 1000),
+      },
+    })
+    .catch(() => undefined);
+  return minutes;
+}
 
 async function autoReplyToInbound(
   page: { id: string; autoAiEnabled: boolean },
@@ -89,14 +127,52 @@ async function autoReplyToInbound(
     },
   });
 
-  const imageProductIds =
+  // Gioi han gui anh: toi da 2 luot moi hoi thoai (chu shop yeu cau - kem anh
+  // vao moi tin tra loi lam phien khach). Moi luot gui gom nhieu anh lien tiep,
+  // duoc luu thanh cac tin "[Hinh anh]" co sentAt sat nhau, nen gom nhom
+  // 10 giay duoc tinh la 1 luot.
+  const MAX_IMAGE_ROUNDS_PER_CONVERSATION = 2;
+  const sentImageMessages = await prisma.pageMessage.findMany({
+    where: { conversationId, direction: "OUTBOUND", text: "[Hình ảnh]" },
+    select: { sentAt: true },
+  });
+  const imageRoundsSent = new Set(
+    sentImageMessages.map((m) => Math.floor(m.sentAt.getTime() / 10000))
+  ).size;
+  const maySendImages = imageRoundsSent < MAX_IMAGE_ROUNDS_PER_CONVERSATION;
+
+  let imageProductIds =
     advice.sendImages?.length > 0
       ? advice.sendImages
       : advice.recommendedProducts?.map((p) => p.id) || [];
-  const [productUrls, customerUrls] = await Promise.all([
-    resolveProductImageUrls(page.id, imageProductIds, { maxPerProduct: 5 }),
-    resolveCustomerPhotoUrls(page.id, advice.sendCustomerPhotos || []),
-  ]);
+
+  // Khi bat dau hoi thoai (chua tung gui anh), luon kem anh cua san pham chinh
+  // dang ban de khach thay ngay san pham (chu shop yeu cau: tin san pham khi
+  // bat dau phai kem 1-2 anh). AI chua chon SP nao thi lay SP dang ban dau tien.
+  if (imageRoundsSent === 0 && imageProductIds.length === 0) {
+    const primaryProduct = await prisma.pageProduct.findFirst({
+      where: { pageId: page.id, isActive: true },
+      orderBy: [{ sortOrder: "asc" }, { createdAt: "desc" }],
+      select: { id: true },
+    });
+    if (primaryProduct) imageProductIds = [primaryProduct.id];
+  }
+  let productUrls: string[] = [];
+  let customerUrls: string[] = [];
+  if (maySendImages) {
+    [productUrls, customerUrls] = await Promise.all([
+      resolveProductImageUrls(page.id, imageProductIds, { maxPerProduct: 2 }),
+      resolveCustomerPhotoUrls(page.id, advice.sendCustomerPhotos || []),
+    ]);
+  } else if (
+    imageProductIds.length > 0 ||
+    (advice.sendCustomerPhotos || []).length > 0
+  ) {
+    console.info(
+      "[syncPageMessages] Hoi thoai " + conversationId + " da du " +
+        MAX_IMAGE_ROUNDS_PER_CONVERSATION + " luot gui anh - chi gui text"
+    );
+  }
 
   await sendConversationReply({
     conversationId,
@@ -253,8 +329,34 @@ export async function syncPageMessages(
   userId: string,
   options: SyncPageMessagesOptions = {}
 ) {
+  const pageRateLimit = await prisma.page.findUnique({
+    where: { id: pageId },
+    select: { rateLimitUntil: true, rateLimitStrikes: true },
+  });
+  if (
+    pageRateLimit?.rateLimitUntil &&
+    pageRateLimit.rateLimitUntil > new Date()
+  ) {
+    console.info(
+      "[syncPageMessages] Bo qua Page " +
+        pageId +
+        " - dang cooldown rate limit den " +
+        pageRateLimit.rateLimitUntil.toISOString()
+    );
+    return {
+      conversationsSynced: 0,
+      messagesSynced: 0,
+      aiSuggestions: 0,
+      conversationsNextCursor: undefined,
+      hasMoreConversations: false,
+      messageLimitReached: false,
+    };
+  }
+  const rateLimitStrikes = pageRateLimit?.rateLimitStrikes ?? 0;
+
   const permCheck = await checkUserMessagingPermission(userId);
   if (permCheck.rateLimited) {
+    await recordPageRateLimit(pageId, rateLimitStrikes);
     throw new MessagingPermissionError(FACEBOOK_RATE_LIMIT_MESSAGE);
   }
   if (!permCheck.granted) {
@@ -292,11 +394,21 @@ export async function syncPageMessages(
       messagesBefore = oldest?.fbMessageId;
     }
 
-    const fbMessages = await client.getConversationMessages(
-      conversation.fbConversationId,
-      page.id,
-      { limit: messageLimit, before: messagesBefore }
-    );
+    let fbMessages: Awaited<
+      ReturnType<typeof client.getConversationMessages>
+    >;
+    try {
+      fbMessages = await client.getConversationMessages(
+        conversation.fbConversationId,
+        page.id,
+        { limit: messageLimit, before: messagesBefore }
+      );
+    } catch (err) {
+      if (isRateLimitError(err)) {
+        await recordPageRateLimit(pageId, rateLimitStrikes);
+      }
+      throw err;
+    }
 
     const result = await syncMessagesForConversation(
       page,
@@ -309,7 +421,11 @@ export async function syncPageMessages(
 
     await prisma.page.update({
       where: { id: page.id },
-      data: { lastMessageSyncAt: new Date() },
+      data: {
+        lastMessageSyncAt: new Date(),
+        rateLimitUntil: null,
+        rateLimitStrikes: 0,
+      },
     });
 
     return {
@@ -327,6 +443,16 @@ export async function syncPageMessages(
       after: options.conversationsAfter,
     });
   } catch (err) {
+    if (isRateLimitError(err)) {
+      const minutes = await recordPageRateLimit(pageId, rateLimitStrikes);
+      console.error(
+        "[syncPageMessages] Page " +
+          pageId +
+          " bi rate limit - nghi " +
+          minutes +
+          " phut"
+      );
+    }
     throw new MessagingPermissionError(formatMessagingError(err));
   }
 
@@ -337,12 +463,52 @@ export async function syncPageMessages(
       break;
     }
 
+    const existingConv = await prisma.pageConversation.findUnique({
+      where: {
+        pageId_fbConversationId: {
+          pageId: page.id,
+          fbConversationId: fbConv.id,
+        },
+      },
+      select: { lastMessageAt: true },
+    });
+
     const conversation = await upsertConversation(page, fbConv);
     conversationsSynced++;
 
-    const fbMessages = await client.getConversationMessages(fbConv.id, page.id, {
-      limit: messageLimit,
-    });
+    // Bo qua hoi thoai khong co tin moi ke tu lan dong bo truoc:
+    // moi hoi thoai la 1 request Graph, day la noi ton request nhat.
+    const fbUpdatedAt = fbConv.updated_time
+      ? new Date(fbConv.updated_time)
+      : null;
+    if (
+      existingConv?.lastMessageAt &&
+      fbUpdatedAt &&
+      existingConv.lastMessageAt >= fbUpdatedAt
+    ) {
+      continue;
+    }
+
+    let fbMessages: Awaited<
+      ReturnType<typeof client.getConversationMessages>
+    >;
+    try {
+      fbMessages = await client.getConversationMessages(fbConv.id, page.id, {
+        limit: messageLimit,
+      });
+    } catch (err) {
+      if (isRateLimitError(err)) {
+        const minutes = await recordPageRateLimit(pageId, rateLimitStrikes);
+        console.error(
+          "[syncPageMessages] Page " +
+            pageId +
+            " bi rate limit - nghi " +
+            minutes +
+            " phut"
+        );
+      }
+      throw err;
+    }
 
     const result = await syncMessagesForConversation(
       page,
@@ -356,7 +522,11 @@ export async function syncPageMessages(
 
   await prisma.page.update({
     where: { id: page.id },
-    data: { lastMessageSyncAt: new Date() },
+    data: {
+      lastMessageSyncAt: new Date(),
+      rateLimitUntil: null,
+      rateLimitStrikes: 0,
+    },
   });
 
   return {
