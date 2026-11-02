@@ -122,7 +122,7 @@ def get_message_advice_prompt(
 
     lang = "tiếng Việt" if language == "vi" else "English"
     history_str = ""
-    for msg in conversation_history[-12:]:
+    for msg in conversation_history[-30:]:
         role = "Khách" if msg.get("role") == "customer" else "Page"
         history_str += f"{role}: {msg.get('text', '')}\n"
 

@@ -40,7 +40,7 @@ export async function generateMessageAdvice(options: {
       conversation: {
         include: {
           page: true,
-          messages: { orderBy: { sentAt: "asc" }, take: 20 },
+          messages: { orderBy: { sentAt: "asc" }, take: 30 },
         },
       },
     },
