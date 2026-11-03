@@ -58,7 +58,8 @@ export async function sendConversationReply(
   options: SendReplyOptions
 ): Promise<SendReplyResult> {
   const text = options.text.trim();
-  const imageUrls = normalizeUrls(options.imageUrls || []);
+  // Luật của chủ Page (2026-11-03): mỗi lượt gửi tối đa 2 ảnh — không gửi nhiều hơn.
+  const imageUrls = normalizeUrls(options.imageUrls || []).slice(0, 2);
 
   if (!text && imageUrls.length === 0) {
     throw new Error("Nội dung tin nhắn trống");
