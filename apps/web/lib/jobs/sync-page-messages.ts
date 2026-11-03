@@ -64,6 +64,34 @@ async function recordPageRateLimit(
   return minutes;
 }
 
+/** Tin khách chỉ là sticker like (👍) hoặc toàn emoji — không có câu hỏi nào để
+ * tư vấn. Trước đây advisor vẫn bị gọi cho từng 👍 và trả về 1 bài pitch giá
+ * đầy đủ, kể cả SAU khi khách đã chốt đơn (hội thoại Thong Vo Huy, đơn
+ * #DH-20261103-003: 3 pitch liên tiếp trả lời 3 sticker like). */
+export function isAckOnlyMessage(
+  text: string | null,
+  attachments: unknown
+): boolean {
+  const t = (text || "").trim();
+  if (t && t !== "[Đính kèm]") {
+    // RegExp qua constructor: tsconfig target < es6 không cho flag "u" trên literal
+    const stripped = t
+      .replace(
+        new RegExp("[\\p{Extended_Pictographic}\\p{So}\\s\\uFE0F]", "gu"),
+        ""
+      )
+      .trim();
+    return stripped.length === 0;
+  }
+  if (!Array.isArray(attachments) || attachments.length === 0) return false;
+  return attachments.every((a) => {
+    const rec = a as { id?: string; name?: string } | null;
+    const id = rec?.id || "";
+    const name = rec?.name || "";
+    return id.startsWith("sticker_") || name.startsWith("sticker-");
+  });
+}
+
 async function autoReplyToInbound(
   page: { id: string; autoAiEnabled: boolean },
   conversationId: string,
@@ -80,6 +108,34 @@ async function autoReplyToInbound(
     },
   });
   if (alreadyReplied) return false;
+
+  // Không pitch cho tin chỉ là 👍/sticker/emoji xác nhận — không có gì để trả
+  // lời mà gửi bài pitch giá là spam, kể cả trước lẫn sau khi chốt đơn.
+  const msgRow = await prisma.pageMessage.findUnique({
+    where: { id: message.id },
+    select: { text: true, attachments: true },
+  });
+  if (msgRow && isAckOnlyMessage(msgRow.text, msgRow.attachments)) {
+    console.info(
+      `[syncPageMessages] Bỏ qua tin sticker/emoji (không pitch) cho page ${page.id}`
+    );
+    return false;
+  }
+
+  // Đã chốt đơn + tin chỉ là đính kèm không chữ → không gửi pitch bán hàng nữa
+  const inboundText = (msgRow?.text || message.text || "").trim();
+  if (msgRow && (inboundText === "[Đính kèm]" || inboundText === "")) {
+    const existingOrder = await prisma.pageCustomerOrder.findFirst({
+      where: { conversationId },
+      select: { id: true },
+    });
+    if (existingOrder) {
+      console.info(
+        `[syncPageMessages] Hội thoại ${conversationId} đã có đơn — bỏ qua pitch cho tin đính kèm`
+      );
+      return false;
+    }
+  }
 
   // Chặn trả lời trùng: khách gửi lại đúng nội dung vừa được AI trả lời trong vòng
   // 3 phút (chạm đúp, bấm lại nút đặt mua từ quảng cáo) thì bỏ qua, tránh bot lặp y hệt.
