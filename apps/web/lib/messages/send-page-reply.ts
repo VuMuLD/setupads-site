@@ -89,6 +89,43 @@ export async function sendConversationReply(
   const messagingType = options.messagingType || "RESPONSE";
   const tag = options.tag;
 
+  // Thứ tự gửi theo yêu cầu của chủ Page (2026-11-03): ẢNH TRƯỚC, chữ SAU,
+  // để khách thấy ảnh sản phẩm trước rồi mới đọc phần chữ ngay dưới ảnh.
+  // Ảnh nào gửi lỗi thì bỏ qua ảnh đó — vẫn gửi các ảnh còn lại và tin chữ.
+  let seq = 0;
+
+  for (let i = 0; i < imageUrls.length; i++) {
+    const imageUrl = imageUrls[i];
+    try {
+      const result = await client.sendPageMessage(
+        conversation.page.fbPageId,
+        conversation.pageId,
+        conversation.participantFbId,
+        { imageUrl },
+        { messagingType, tag }
+      );
+      const fbId = result.message_id || `local-${Date.now()}-img-${i}`;
+      fbMessageIds.push(fbId);
+
+      const saved = await prisma.pageMessage.create({
+        data: {
+          conversationId: conversation.id,
+          fbMessageId: fbId,
+          direction: "OUTBOUND" as MessageDirection,
+          text: "[Hình ảnh]",
+          attachments: { type: "image", url: imageUrl } as object,
+          sentAt: new Date(now.getTime() + seq++),
+        },
+      });
+      messageIds.push(saved.id);
+    } catch (imgErr) {
+      console.error(
+        "[sendConversationReply] Gửi ảnh lỗi, bỏ qua ảnh này:",
+        imgErr
+      );
+    }
+  }
+
   if (text) {
     const result = await client.sendPageMessage(
       conversation.page.fbPageId,
@@ -106,32 +143,7 @@ export async function sendConversationReply(
         fbMessageId: fbId,
         direction: "OUTBOUND" as MessageDirection,
         text,
-        sentAt: now,
-      },
-    });
-    messageIds.push(saved.id);
-  }
-
-  for (let i = 0; i < imageUrls.length; i++) {
-    const imageUrl = imageUrls[i];
-    const result = await client.sendPageMessage(
-      conversation.page.fbPageId,
-      conversation.pageId,
-      conversation.participantFbId,
-      { imageUrl },
-      { messagingType, tag }
-    );
-    const fbId = result.message_id || `local-${Date.now()}-img-${i}`;
-    fbMessageIds.push(fbId);
-
-    const saved = await prisma.pageMessage.create({
-      data: {
-        conversationId: conversation.id,
-        fbMessageId: fbId,
-        direction: "OUTBOUND" as MessageDirection,
-        text: "[Hình ảnh]",
-        attachments: { type: "image", url: imageUrl } as object,
-        sentAt: new Date(now.getTime() + i + 1),
+        sentAt: new Date(now.getTime() + seq++),
       },
     });
     messageIds.push(saved.id);
