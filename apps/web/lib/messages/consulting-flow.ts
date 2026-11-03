@@ -135,9 +135,10 @@ export function getConsultingPlan(stage: ConsultingStage): string {
       "4. TUYỆT ĐỐI không ép chốt, không hỏi xin thông tin",
     ].join("\n"),
     purchased: [
-      "1. Cảm ơn khách đã tin tưởng",
-      "2. Xác nhận đơn, thời gian giao dự kiến",
-      "3. Mời khách feedback sau khi nhận hàng",
+      "1. Khách ĐÃ CHỐT ĐƠN — chỉ hỗ trợ sau mua: giao hàng, kiểm tra hàng, đổi trả, bảo hành, cách dùng",
+      "2. Trả lời ĐÚNG câu khách hỏi, 1 câu ngắn gọn — xong là dừng",
+      "3. Nếu khách chỉ cảm ơn/xác nhận (ok, dạ, cảm ơn...) → đáp lại 1 câu cảm ơn ngắn, KHÔNG nói thêm gì nữa",
+      "4. TUYỆT ĐỐI không nhắc lại giá/ưu đãi, không giới thiệu sản phẩm, không gửi ảnh, không móc nối chốt đơn, không xin lại SĐT/địa chỉ",
     ].join("\n"),
   };
   return plans[stage];
@@ -164,7 +165,7 @@ export function getStageGuidance(stage: ConsultingStage): string {
     follow_up_final:
       "Tin nhắn cuối trong chuỗi chăm sóc (sắp hết cửa sổ 24h của Messenger). Tuyệt đối không ép chốt. Lịch sự, để lại ấn tượng tốt và lời mời mở để khách quay lại bất cứ lúc nào.",
     purchased:
-      "Khách đã đặt/mua. Cảm ơn, xác nhận đơn. Không tư vấn bán thêm trừ khi khách hỏi.",
+      "Khách đã đặt hàng rồi — mọi tin nhắn bán hàng lúc này đều là spam. Chỉ trả lời hỗ trợ sau mua, thật ngắn và đúng trọng tâm; không pitch, không báo giá lại, không gửi ảnh sản phẩm, không móc nối mua thêm.",
   };
   return guidance[stage];
 }

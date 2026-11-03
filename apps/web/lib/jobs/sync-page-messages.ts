@@ -122,19 +122,25 @@ async function autoReplyToInbound(
     return false;
   }
 
-  // Đã chốt đơn + tin chỉ là đính kèm không chữ → không gửi pitch bán hàng nữa
+  // Hội thoại đã có đơn hay chưa — quyết định chế độ trả lời ở dưới:
+  // đã chốt đơn thì bot chỉ hỗ trợ sau mua, tuyệt đối không bán/pitch nữa
+  // (chủ shop chốt 2026-11-03: "khách chốt rồi mà còn nhắn vậy là spam").
+  const existingOrder = await prisma.pageCustomerOrder.findFirst({
+    where: { conversationId },
+    select: { id: true },
+  });
+
+  // Đã chốt đơn + tin chỉ là đính kèm không chữ → im lặng, không pitch nữa
   const inboundText = (msgRow?.text || message.text || "").trim();
-  if (msgRow && (inboundText === "[Đính kèm]" || inboundText === "")) {
-    const existingOrder = await prisma.pageCustomerOrder.findFirst({
-      where: { conversationId },
-      select: { id: true },
-    });
-    if (existingOrder) {
-      console.info(
-        `[syncPageMessages] Hội thoại ${conversationId} đã có đơn — bỏ qua pitch cho tin đính kèm`
-      );
-      return false;
-    }
+  if (
+    existingOrder &&
+    msgRow &&
+    (inboundText === "[Đính kèm]" || inboundText === "")
+  ) {
+    console.info(
+      `[syncPageMessages] Hội thoại ${conversationId} đã có đơn — bỏ qua pitch cho tin đính kèm`
+    );
+    return false;
   }
 
   // Chặn trả lời trùng: khách gửi lại đúng nội dung vừa được AI trả lời trong vòng
@@ -169,6 +175,8 @@ async function autoReplyToInbound(
     userId,
     pageId: page.id,
     messageId: message.id,
+    // Đã có đơn → ép stage "purchased": chỉ hỗ trợ sau mua, không tư vấn bán
+    ...(existingOrder ? { stageOverride: "purchased" as const } : {}),
   });
 
   if (!advice.reply) return false;
@@ -195,17 +203,20 @@ async function autoReplyToInbound(
   const imageRoundsSent = new Set(
     sentImageMessages.map((m) => Math.floor(m.sentAt.getTime() / 10000))
   ).size;
-  const maySendImages = imageRoundsSent < MAX_IMAGE_ROUNDS_PER_CONVERSATION;
+  // Đã có đơn thì KHÔNG gửi ảnh sản phẩm nữa — khách đã mua rồi
+  const maySendImages =
+    !existingOrder && imageRoundsSent < MAX_IMAGE_ROUNDS_PER_CONVERSATION;
 
-  let imageProductIds =
-    advice.sendImages?.length > 0
+  let imageProductIds = existingOrder
+    ? []
+    : advice.sendImages?.length > 0
       ? advice.sendImages
       : advice.recommendedProducts?.map((p) => p.id) || [];
 
   // Khi bat dau hoi thoai (chua tung gui anh), luon kem anh cua san pham chinh
   // dang ban de khach thay ngay san pham (chu shop yeu cau: tin san pham khi
   // bat dau phai kem 1-2 anh). AI chua chon SP nao thi lay SP dang ban dau tien.
-  if (imageRoundsSent === 0 && imageProductIds.length === 0) {
+  if (!existingOrder && imageRoundsSent === 0 && imageProductIds.length === 0) {
     const primaryProduct = await prisma.pageProduct.findFirst({
       where: { pageId: page.id, isActive: true },
       orderBy: [{ sortOrder: "asc" }, { createdAt: "desc" }],
