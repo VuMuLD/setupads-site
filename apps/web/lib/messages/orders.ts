@@ -313,16 +313,15 @@ export async function captureOrderFromConversation(
     return { captured: false, reason: "no_order_info" };
   }
 
-  // Tự động bắt đơn: chỉ tạo đơn + gửi xác nhận khi ĐỦ Tên + SĐT + ĐC + SP.
-  // Thiếu thì chờ tin tiếp theo của khách (mỗi tin mới đều chạy lại capture)
-  // thay vì chốt đơn thiếu như #DH-20261103-002. Nhân viên chốt tay
-  // (manual/force) không bị chặn này.
+  // Tự động bắt đơn: khách CHỈ CẦN SĐT + địa chỉ là lên đơn (chủ shop chốt
+  // 2026-11-03). Tên lấy từ profile FB, sản phẩm/giá lấy từ catalog của Page.
+  // Thiếu SĐT hoặc địa chỉ thì chờ tin tiếp theo của khách (mỗi tin mới đều
+  // chạy lại capture) thay vì chốt đơn thiếu như #DH-20261103-002.
+  // Nhân viên chốt tay (manual/force) không bị chặn này.
   if (!options?.manual && !options?.force) {
     const missing: string[] = [];
-    if (!conversation.participantName) missing.push("name");
     if (!extracted.phone) missing.push("phone");
     if (!extracted.address) missing.push("address");
-    if (!extracted.productSummary) missing.push("product");
     if (missing.length) {
       return {
         captured: false,
