@@ -75,6 +75,42 @@ export function buildOrderCollectionStatus(
   };
 }
 
+function stripVnDiacritics(s: string): string {
+  return s
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/g, "d")
+    .replace(/Đ/g, "D")
+    .toLowerCase();
+}
+
+const VN_PROVINCES = [
+  "ha noi", "ho chi minh", "hai phong", "da nang", "can tho", "phu tho",
+  "hoa binh", "bac ninh", "bac giang", "vinh phuc", "hung yen", "hai duong",
+  "quang ninh", "thai nguyen", "lang son", "lao cai", "yen bai", "son la",
+  "dien bien", "lai chau", "ha giang", "cao bang", "bac kan", "tuyen quang",
+  "nam dinh", "thai binh", "ninh binh", "ha nam", "thanh hoa", "nghe an",
+  "ha tinh", "quang binh", "quang tri", "thua thien hue", "quang nam",
+  "quang ngai", "binh dinh", "phu yen", "khanh hoa", "ninh thuan",
+  "binh thuan", "kon tum", "gia lai", "dak lak", "dak nong", "lam dong",
+  "binh phuoc", "binh duong", "dong nai", "tay ninh", "ba ria vung tau",
+  "long an", "tien giang", "ben tre", "tra vinh", "vinh long", "dong thap",
+  "an giang", "kien giang", "hau giang", "soc trang", "bac lieu", "ca mau",
+];
+
+/** Nhận diện 1 dòng tin nhắn có phải địa chỉ giao hàng không — kể cả khi
+ * khách gõ thiếu dấu/không có từ khóa chuẩn, vd "Khu 2 đại phạm hạ Hòa phú Thọ"
+ * (đơn #DH-20261103-002 từng bị mất địa chỉ vì dòng này không khớp từ khóa cũ). */
+function looksLikeAddressLine(line: string): boolean {
+  if (ADDRESS_KEYWORDS.test(line)) return true;
+  if (/^\d+[\s,/]/.test(line)) return true;
+  const n = stripVnDiacritics(line).replace(/[.,]/g, " ");
+  if (/^(khu|thon|ap|xom|to|so|ngo|hem|duong|pho|ban)\b/.test(n)) return true;
+  if (/\b(xa|phuong|huyen|quan|thi xa|thi tran|tinh|thanh pho)\b/.test(n)) return true;
+  const padded = ` ${n.replace(/\s+/g, " ")} `;
+  return VN_PROVINCES.some((p) => padded.includes(` ${p} `));
+}
+
 function extractAddressFromInbound(allInbound: string): string | null {
   const labeled = extractAddressFromText(allInbound);
   if (labeled) return labeled;
@@ -88,7 +124,7 @@ function extractAddressFromInbound(allInbound: string): string | null {
   for (const line of lines.reverse()) {
     if (line.length < 12 || line.length > 220) continue;
     if (PHONE_EXTRACT.test(line) && line.replace(/\D/g, "").length <= 11) continue;
-    if (ADDRESS_KEYWORDS.test(line) || /^\d+[\s,/]/.test(line)) {
+    if (looksLikeAddressLine(line)) {
       return line.replace(/^(địa\s*chỉ|dc|addr)\s*:?\s*/i, "").trim();
     }
   }
@@ -114,6 +150,11 @@ function extractProductSummaryFromInbound(
       }
     }
     if (found.length) return found.join(", ");
+    // Page chỉ bán 1 sản phẩm → đơn luôn là sản phẩm đó. Nhiều sản phẩm mà
+    // không khớp tên catalog thì để trống, KHÔNG bịa từ câu chữ của khách
+    // (lỗi cũ: câu "ko đẹp ko nhận a" bị ghi thành sản phẩm của đơn #DH-20261103-002).
+    if (productNames.length === 1) return productNames[0];
+    return null;
   }
 
   const labeled: string[] = [];

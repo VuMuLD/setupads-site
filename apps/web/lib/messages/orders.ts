@@ -52,40 +52,59 @@ export async function generateOrderCode(pageId: string): Promise<string> {
   return `DH-${dateStr}-${String(count + 1).padStart(3, "0")}`;
 }
 
+/** "Bếp Việt" → "BV", "Siêu Thị Gia Dụng" → "STGD" — ghi tắt Page theo form chốt đơn của chủ shop */
+export function abbreviatePageName(pageName: string): string {
+  return pageName
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((w) =>
+      w
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/đ/gi, "d")
+        .charAt(0)
+        .toUpperCase()
+    )
+    .join("");
+}
+
 export function formatOrderConfirmationMessage(options: {
   orderCode: string;
   pageName: string;
   customerName: string | null;
   productSummary: string | null;
+  productCode?: string | null;
   size: string | null;
   quantity: number | null;
   phone: string | null;
   address: string | null;
   amount: number | null;
+  unitPrice?: number | null;
+  confirmedAt?: Date | null;
 }): string {
-  const name = options.customerName?.trim() || "anh/chị";
+  // Form chốt đơn chuẩn của chủ shop (2026-11-03): đúng và đủ, mã đơn giữ nguyên.
+  const qty = options.quantity && options.quantity > 0 ? options.quantity : 1;
+  const unitPrice =
+    options.unitPrice ??
+    (options.amount ? Math.round(options.amount / qty) : null);
+  const vnDate = new Date(
+    (options.confirmedAt ?? new Date()).toLocaleString("en-US", {
+      timeZone: "Asia/Ho_Chi_Minh",
+    })
+  );
+  const dateStr = `${String(vnDate.getDate()).padStart(2, "0")}/${String(
+    vnDate.getMonth() + 1
+  ).padStart(2, "0")}`;
   const lines = [
     `✅ XÁC NHẬN ĐƠN #${options.orderCode}`,
-    "",
-    `Cảm ơn ${name} đã đặt hàng tại ${options.pageName}!`,
-    "",
+    `Ngày: ${dateStr}`,
+    `Tên: ${options.customerName?.trim() || "anh/chị"}`,
+    `SĐT: ${options.phone?.trim() || ""}`,
+    `ĐC: ${options.address?.trim() || ""}`,
+    `${options.productCode || "SP01"} . Số Lượng: ${qty}`,
+    `Giá / 1 bộ: ${unitPrice ? `${unitPrice.toLocaleString("vi-VN")}đ` : ""}`,
+    abbreviatePageName(options.pageName),
   ];
-
-  if (options.productSummary) lines.push(`📦 Sản phẩm: ${options.productSummary}`);
-  if (options.size) lines.push(`📏 Size: ${options.size}`);
-  if (options.quantity) lines.push(`🔢 Số lượng: ${options.quantity}`);
-  if (options.amount) {
-    lines.push(`💰 Tổng: ${options.amount.toLocaleString("vi-VN")}đ`);
-  }
-  if (options.phone) lines.push(`📞 SĐT: ${options.phone}`);
-  if (options.address) lines.push(`📍 Giao đến: ${options.address}`);
-
-  lines.push(
-    "",
-    "Shop sẽ xử lý và giao hàng sớm nhất ạ.",
-    "Anh/chị cần sửa thông tin cứ nhắn em nhé!"
-  );
-
   return lines.join("\n");
 }
 
@@ -97,6 +116,7 @@ export async function recordPageOrder(
   options?: {
     sourceMessageId?: string;
     participantName?: string | null;
+    productIds?: string[];
   }
 ) {
   const existing = await prisma.pageCustomerOrder.findFirst({
@@ -117,6 +137,7 @@ export async function recordPageOrder(
       size: extracted.size,
       quantity: extracted.quantity,
       productSummary: extracted.productSummary,
+      productIds: options?.productIds,
       amount: extracted.amount,
       sourceMessageId: options?.sourceMessageId || null,
       status: "received",
@@ -153,16 +174,40 @@ export async function sendOrderConfirmation(
 
   if (!order?.conversationId || order.confirmationSentAt) return false;
 
+  // Mã SP theo vị trí trong catalog của Page (SP01, SP02...) + giá/1 bộ từ catalog
+  const pageProducts = await prisma.pageProduct.findMany({
+    where: { pageId: order.pageId, isActive: true },
+    orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+    select: { id: true, price: true },
+  });
+  const orderProductIds = Array.isArray(order.productIds)
+    ? (order.productIds as string[])
+    : [];
+  let productIdx = orderProductIds.length
+    ? pageProducts.findIndex((p) => p.id === orderProductIds[0])
+    : -1;
+  if (productIdx < 0 && pageProducts.length === 1) productIdx = 0;
+  const productCode =
+    productIdx >= 0 ? `SP${String(productIdx + 1).padStart(2, "0")}` : "SP01";
+  const unitPrice =
+    (productIdx >= 0 ? pageProducts[productIdx].price : null) ??
+    (order.amount && order.quantity
+      ? Math.round(order.amount / order.quantity)
+      : order.amount);
+
   const text = formatOrderConfirmationMessage({
     orderCode: order.orderCode || order.id.slice(-8).toUpperCase(),
     pageName: order.page.name,
     customerName: order.participantName || order.customer.participantName,
     productSummary: order.productSummary,
+    productCode,
     size: order.size,
     quantity: order.quantity,
     phone: order.phone || order.customer.phone,
     address: order.address || order.customer.address,
     amount: order.amount,
+    unitPrice,
+    confirmedAt: order.confirmedAt,
   });
 
   await sendConversationReply({
@@ -217,7 +262,8 @@ export async function captureOrderFromConversation(
 
   const pageProducts = await prisma.pageProduct.findMany({
     where: { pageId: conversation.pageId, isActive: true },
-    select: { name: true },
+    orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+    select: { id: true, name: true, price: true },
   });
 
   const flowMessages = conversation.messages.map((m) => ({
@@ -233,6 +279,22 @@ export async function captureOrderFromConversation(
     flowMessages,
     pageProducts.map((p) => p.name)
   );
+
+  // Chuẩn hóa theo catalog của Page: sản phẩm/giá/số lượng lấy từ catalog,
+  // không lấy từ câu chữ tự do của khách.
+  const matchedProduct =
+    pageProducts.find((p) => p.name === extracted.productSummary) ||
+    (pageProducts.length === 1 ? pageProducts[0] : null);
+  let productIds: string[] | undefined;
+  if (matchedProduct) {
+    extracted.productSummary = matchedProduct.name;
+    if (!extracted.quantity) extracted.quantity = 1;
+    if (matchedProduct.price) {
+      extracted.amount = matchedProduct.price * extracted.quantity;
+    }
+    productIds = [matchedProduct.id];
+  }
+
   const hasOrderInfo = Boolean(
     extracted.phone || extracted.address || extracted.productSummary || extracted.size
   );
@@ -249,6 +311,24 @@ export async function captureOrderFromConversation(
 
   if (options?.manual && !hasOrderInfo && !options?.force) {
     return { captured: false, reason: "no_order_info" };
+  }
+
+  // Tự động bắt đơn: chỉ tạo đơn + gửi xác nhận khi ĐỦ Tên + SĐT + ĐC + SP.
+  // Thiếu thì chờ tin tiếp theo của khách (mỗi tin mới đều chạy lại capture)
+  // thay vì chốt đơn thiếu như #DH-20261103-002. Nhân viên chốt tay
+  // (manual/force) không bị chặn này.
+  if (!options?.manual && !options?.force) {
+    const missing: string[] = [];
+    if (!conversation.participantName) missing.push("name");
+    if (!extracted.phone) missing.push("phone");
+    if (!extracted.address) missing.push("address");
+    if (!extracted.productSummary) missing.push("product");
+    if (missing.length) {
+      return {
+        captured: false,
+        reason: `incomplete_order_info:${missing.join(",")}`,
+      };
+    }
   }
 
   const customer = await getOrCreatePageCustomer(
@@ -270,6 +350,7 @@ export async function captureOrderFromConversation(
     {
       sourceMessageId: lastInbound?.id,
       participantName: conversation.participantName,
+      productIds,
     }
   );
 
@@ -283,6 +364,8 @@ export async function captureOrderFromConversation(
         size: extracted.size || order.size,
         quantity: extracted.quantity || order.quantity,
         productSummary: extracted.productSummary || order.productSummary,
+        amount: extracted.amount || order.amount,
+        ...(productIds ? { productIds } : {}),
         participantName: conversation.participantName || order.participantName,
       },
     });
