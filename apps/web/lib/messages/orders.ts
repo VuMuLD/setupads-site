@@ -104,6 +104,9 @@ export function formatOrderConfirmationMessage(options: {
     `${options.productCode || "SP01"} . Số Lượng: ${qty}`,
     `Giá / 1 bộ: ${unitPrice ? `${unitPrice.toLocaleString("vi-VN")}đ` : ""}`,
     abbreviatePageName(options.pageName),
+    "",
+    // Câu chốt sau xác nhận đơn — nguyên văn chủ shop chốt 2026-11-03
+    "Dạ em đã lên đơn cho anh/chị rồi ạ. Tầm 3-5 ngày nữa bác để ý điện thoại shipper gọi nhận hàng nhé. Cần hỗ trợ gì bác cứ nhắn em ạ!",
   ];
   return lines.join("\n");
 }
@@ -244,6 +247,7 @@ export async function captureOrderFromConversation(
   size?: string | null;
   quantity?: number | null;
   confirmationSent?: boolean;
+  confirmationJustSent?: boolean;
 }> {
   const conversation = await prisma.pageConversation.findFirst({
     where: {
@@ -371,6 +375,7 @@ export async function captureOrderFromConversation(
   }
 
   let confirmationSent = Boolean(finalOrder.confirmationSentAt);
+  const hadConfirmation = confirmationSent;
 
   const shouldConfirm =
     (isNew || (options?.manual && !confirmationSent)) && !options?.skipConfirm;
@@ -383,6 +388,8 @@ export async function captureOrderFromConversation(
       console.error("[captureOrder] confirm send failed:", err);
     }
   }
+  // Xác nhận vừa được gửi trong lần capture này (không phải đã gửi từ trước)
+  const confirmationJustSent = confirmationSent && !hadConfirmation;
 
   if (isNew || options?.manual) {
     void learnFromConversation(conversationId, { force: true }).catch((err) =>
@@ -401,6 +408,7 @@ export async function captureOrderFromConversation(
     size: finalOrder.size,
     quantity: finalOrder.quantity,
     confirmationSent,
+    confirmationJustSent,
   };
 }
 

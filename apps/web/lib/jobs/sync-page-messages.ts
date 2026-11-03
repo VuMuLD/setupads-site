@@ -303,15 +303,19 @@ async function syncMessagesForConversation(
     });
     messagesSynced++;
 
+    let orderJustConfirmed = false;
     if (direction === "INBOUND") {
       try {
-        await captureOrderFromConversation(conversationId, userId);
+        const capture = await captureOrderFromConversation(conversationId, userId);
+        orderJustConfirmed = Boolean(capture.confirmationJustSent);
       } catch (err) {
         console.error("[syncPageMessages] order capture failed:", err);
       }
     }
 
-    if (direction === "INBOUND" && page.autoAiEnabled) {
+    // Vừa gửi xác nhận đơn cho tin này thì KHÔNG trả lời AI thêm nữa —
+    // khách đã chốt đơn, tránh spam 2 tin shop liên tiếp (chủ shop chốt 2026-11-03)
+    if (direction === "INBOUND" && page.autoAiEnabled && !orderJustConfirmed) {
       try {
         const sent = await autoReplyToInbound(page, conversationId, message, userId);
         if (sent) aiSuggestions++;
