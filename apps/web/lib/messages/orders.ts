@@ -104,12 +104,14 @@ export function formatOrderConfirmationMessage(options: {
     `${options.productCode || "SP01"} . Số Lượng: ${qty}`,
     `Giá / 1 bộ: ${unitPrice ? `${unitPrice.toLocaleString("vi-VN")}đ` : ""}`,
     abbreviatePageName(options.pageName),
-    "",
-    // Câu chốt sau xác nhận đơn — nguyên văn chủ shop chốt 2026-11-03
-    "Dạ em đã lên đơn cho anh/chị rồi ạ. Tầm 3-5 ngày nữa bác để ý điện thoại shipper gọi nhận hàng nhé. Cần hỗ trợ gì bác cứ nhắn em ạ!",
   ];
   return lines.join("\n");
 }
+
+/** Câu chốt gửi thành 1 tin RIÊNG ngay sau khi tin xác nhận đơn đã gửi xong
+ * (chủ shop chốt 2026-11-03 — nguyên văn, không gộp vào tin xác nhận) */
+export const ORDER_CLOSING_MESSAGE =
+  "Dạ em đã lên đơn cho anh/chị rồi ạ. Tầm 3-5 ngày nữa bác để ý điện thoại shipper gọi nhận hàng nhé. Cần hỗ trợ gì bác cứ nhắn em ạ!";
 
 export async function recordPageOrder(
   pageId: string,
@@ -218,6 +220,18 @@ export async function sendOrderConfirmation(
     userId,
     text,
   });
+
+  // Tin xác nhận đã gửi xong → gửi tiếp câu chốt thành 1 tin riêng.
+  // Lỗi ở tin chốt không được làm hỏng trạng thái xác nhận của đơn.
+  try {
+    await sendConversationReply({
+      conversationId: order.conversationId,
+      userId,
+      text: ORDER_CLOSING_MESSAGE,
+    });
+  } catch (err) {
+    console.error("[sendOrderConfirmation] closing send failed:", err);
+  }
 
   await prisma.pageCustomerOrder.update({
     where: { id: order.id },
