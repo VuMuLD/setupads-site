@@ -113,6 +113,54 @@ export function formatOrderConfirmationMessage(options: {
 export const ORDER_CLOSING_MESSAGE =
   "Dạ em đã lên đơn cho anh/chị rồi ạ. Tầm 3-5 ngày nữa bác để ý điện thoại shipper gọi nhận hàng nhé. Cần hỗ trợ gì bác cứ nhắn em ạ!";
 
+/** Giá sàn mặc cả ghi trong mô tả sản phẩm, dạng: "thấp nhất còn 679.000đ".
+ * Mô tả SP là nguồn sự thật duy nhất cho giá sàn — sửa mô tả là sửa giá sàn. */
+export function parseFloorPrice(description?: string | null): number | null {
+  if (!description) return null;
+  const m = description.match(/thấp nhất còn\s+([\d.]+)\s*đ/i);
+  if (!m) return null;
+  const value = parseInt(m[1].replace(/[.,]/g, ""), 10);
+  return Number.isFinite(value) && value > 0 ? value : null;
+}
+
+/** Tin có nhắc tới một mức giá cụ thể không (679k / 679.000 / 679000...) */
+function mentionsPrice(text: string, price: number): boolean {
+  const t = text.toLowerCase().replace(/\s+/g, "");
+  const k = Math.round(price / 1000);
+  return (
+    t.includes(`${k}k`) ||
+    t.includes(`${k}.000`) ||
+    t.includes(`${k},000`) ||
+    t.includes(String(price))
+  );
+}
+
+/**
+ * Giá/1 bộ THEO THỎA THUẬN trong hội thoại (chủ shop chốt 2026-11-04: "ghi
+ * theo thoả thuận"). Chỉ tính các tin GỬI ĐI (bot hoặc nhân viên chào giá):
+ * mức giá được nhắc GẦN NHẤT là giá sàn → đơn ghi giá sàn; nhắc gần nhất là
+ * giá niêm yết, hoặc không có thỏa thuận nào → null (giữ giá catalog).
+ * Tin khách tự nhắc giá không tính (khách đòi giá thấp không thành thỏa thuận).
+ */
+export function resolveAgreedUnitPrice(
+  product: { price: number | null; description?: string | null },
+  messages: Array<{ direction: "INBOUND" | "OUTBOUND"; text: string | null }>
+): number | null {
+  if (!product.price) return null;
+  const floor = parseFloorPrice(product.description);
+  if (!floor || floor >= product.price) return null;
+  let lastMentioned: number | null = null;
+  for (const m of messages) {
+    if (m.direction !== "OUTBOUND" || !m.text) continue;
+    const hitFloor = mentionsPrice(m.text, floor);
+    const hitList = mentionsPrice(m.text, product.price);
+    // Một tin nhắc cả 2 (vd "giá gốc 699k, hỗ trợ còn 679k") → tính là chào sàn
+    if (hitFloor) lastMentioned = floor;
+    else if (hitList) lastMentioned = product.price;
+  }
+  return lastMentioned === floor ? floor : null;
+}
+
 export async function recordPageOrder(
   pageId: string,
   customerId: string,
@@ -194,11 +242,17 @@ export async function sendOrderConfirmation(
   if (productIdx < 0 && pageProducts.length === 1) productIdx = 0;
   const productCode =
     productIdx >= 0 ? `SP${String(productIdx + 1).padStart(2, "0")}` : "SP01";
-  const unitPrice =
-    (productIdx >= 0 ? pageProducts[productIdx].price : null) ??
-    (order.amount && order.quantity
+  const catalogUnit = productIdx >= 0 ? pageProducts[productIdx].price : null;
+  const amountUnit =
+    order.amount && order.quantity
       ? Math.round(order.amount / order.quantity)
-      : order.amount);
+      : null;
+  // Đơn đã thỏa thuận giá thấp hơn catalog (vd giá sàn 679k) thì in giá thỏa
+  // thuận đã lưu trong amount, không in lại giá catalog.
+  const unitPrice =
+    amountUnit && catalogUnit && amountUnit < catalogUnit
+      ? amountUnit
+      : catalogUnit ?? amountUnit ?? order.amount;
 
   const text = formatOrderConfirmationMessage({
     orderCode: order.orderCode || order.id.slice(-8).toUpperCase(),
@@ -281,7 +335,7 @@ export async function captureOrderFromConversation(
   const pageProducts = await prisma.pageProduct.findMany({
     where: { pageId: conversation.pageId, isActive: true },
     orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
-    select: { id: true, name: true, price: true },
+    select: { id: true, name: true, price: true, description: true },
   });
 
   const flowMessages = conversation.messages.map((m) => ({
@@ -311,6 +365,14 @@ export async function captureOrderFromConversation(
       extracted.amount = matchedProduct.price * extracted.quantity;
     }
     productIds = [matchedProduct.id];
+    // Giá thỏa thuận: hội thoại đã chốt ở giá sàn mặc cả thì ghi đơn theo giá
+    // sàn thay vì giá catalog (vẫn chỉ ghi khi THẤP HƠN catalog).
+    if (matchedProduct.price) {
+      const agreedUnit = resolveAgreedUnitPrice(matchedProduct, flowMessages);
+      if (agreedUnit && agreedUnit < matchedProduct.price) {
+        extracted.amount = agreedUnit * extracted.quantity;
+      }
+    }
   }
 
   const hasOrderInfo = Boolean(
