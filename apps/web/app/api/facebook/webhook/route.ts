@@ -93,7 +93,7 @@ async function runPageSync(pageId: string, userId: string) {
       }
       try {
         const result = await syncPageMessages(pageId, userId, {
-          conversationLimit: 5,
+          conversationLimit: 10,
           messageLimit: 20,
         });
         console.log(
