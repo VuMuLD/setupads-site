@@ -17,6 +17,52 @@ const AI_SERVICE_URL = process.env.AI_SERVICE_URL || "http://localhost:8000";
 
 const LEARN_COOLDOWN_MS = 5 * 60 * 1000;
 
+/** LUẬT HỌC CỦA SHOP (chủ shop chốt 5/11): bot chỉ học KIẾN THỨC CHAT (kiến
+ * thức sản phẩm + cách trò chuyện giúp khách dễ mua), TUYỆT ĐỐI không học
+ * GIÁ. Lọc cứng tại điểm ghi DB: bài học chứa số giá ngoài giá shop
+ * (niêm yết 699k, sàn 679k, giá gốc 1.200k) hoặc chứa mẫu Page nhượng bộ
+ * theo khách thì bị loại, kể cả khi prompt AI đã trượt. */
+const CONCESSION_PHRASES = [
+  "ho tro het muc",
+  "dong y voi de xuat cua khach",
+  "chap nhan de xuat cua khach",
+  "chap nhan gia khach",
+  "theo gia khach",
+  "chot theo gia",
+  "nhuong gia",
+  "giam theo yeu cau",
+  "chieu khach",
+];
+const ALLOWED_PRICES = new Set([679000, 699000, 1200000]);
+
+function stripVnLower(s: string): string {
+  return s
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+
+    .replace(/đ/g, "d")
+    .replace(/Đ/g, "D")
+    .toLowerCase();
+}
+
+export function isPricePoisonedLearning(
+  ...texts: Array<string | null | undefined>
+): boolean {
+  const blob = texts.filter(Boolean).join(" \n ");
+  if (!blob) return false;
+  const plain = stripVnLower(blob);
+  if (CONCESSION_PHRASES.some((p) => plain.includes(p))) return true;
+  // Bắt số tiền NGUYÊN CỤM (1.200.000 / 699.000 / 699k) để giá gốc 1.200.000đ
+  // không bị tách thành "200.000" rồi kết luận nhầm là giá độc.
+  const tokens =
+    plain.match(/\b\d{1,3}(?:[.,]\d{3})+(?![\d.,])|\b\d{3}\s?k\b/g) || [];
+  return tokens.some((t) => {
+    const num = t.replace(/\D/g, "");
+    const value = num.length <= 3 ? Number(num) * 1000 : Number(num);
+    return value >= 100000 && !ALLOWED_PRICES.has(value);
+  });
+}
+
 export async function ensureCustomerForConversation(conversationId: string) {
   const conversation = await prisma.pageConversation.findUnique({
     where: { id: conversationId },
@@ -153,6 +199,23 @@ export async function learnFromConversation(
     console.error("[learnFromConversation] AI call failed:", err);
   }
 
+  // Lọc cứng luật học trước khi ghi DB: loại bài học/tip dính số giá ngoài
+  // luật shop hoặc mẫu Page nhượng bộ theo khách (isPricePoisonedLearning).
+  if (aiResult.insights?.length) {
+    aiResult.insights = aiResult.insights.filter(
+      (ins) =>
+        !isPricePoisonedLearning(
+          ins.insight,
+          ins.effectiveReply || lastOutbound?.text
+        )
+    );
+  }
+  if (aiResult.pageTips?.length) {
+    aiResult.pageTips = aiResult.pageTips.filter(
+      (t) => !isPricePoisonedLearning(t.tip)
+    );
+  }
+
   const prevPrefs = (customer.preferences as CustomerPreferences) || {};
   const mergedPrefs = {
     ...prevPrefs,
@@ -196,7 +259,9 @@ export async function learnFromConversation(
         insight: purchased
           ? `Khách ${customer.participantName || "này"} chốt đơn ở giai đoạn ${consulting.stageLabel}. ${extracted.productSummary || "Cần hỏi size/màu rõ trước khi chốt."}`
           : `Hội thoại giai đoạn ${consulting.stageLabel}: "${lastInbound?.text?.slice(0, 80) || ""}"`,
-        effectiveReply: lastOutbound?.text?.slice(0, 500) || null,
+        effectiveReply: isPricePoisonedLearning(lastOutbound?.text)
+          ? null
+          : lastOutbound?.text?.slice(0, 500) || null,
         stage: consulting.stage,
         outcome: purchased ? "closed" : "progressed",
       },
@@ -262,7 +327,9 @@ export async function analyzeLostConversation(
         stage?: string;
       }>;
     };
-    const insights = (aiResult.insights || []).filter((i) => i.insight).slice(0, 2);
+    const insights = (aiResult.insights || [])
+      .filter((i) => i.insight && !isPricePoisonedLearning(i.insight, i.effectiveReply))
+      .slice(0, 2);
     if (!insights.length) return false;
     for (const ins of insights) {
       await prisma.pageCustomerLearning.create({

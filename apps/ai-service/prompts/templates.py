@@ -275,6 +275,11 @@ NHIỆM VỤ:
 3. 1-2 pageTips — mẹo chung cho shop từ case này
 4. preferences — size, color, budget, productInterests (mảng), notes
 
+PHẠM VI HỌC (LUẬT CỦA CHỦ SHOP — BẮT BUỘC):
+- Chỉ học KIẾN THỨC CHAT: kiến thức sản phẩm và cách trò chuyện, tương tác giúp khách dễ hiểu, dễ quyết định mua hàng.
+- TUYỆT ĐỐI KHÔNG học về GIÁ: không ghi nhận bất kỳ mức giá nào khách đưa ra hay đòi hỏi; không coi việc giảm giá, nhượng giá hay chốt đơn ở giá khách yêu cầu là điều hiệu quả đáng học; không đưa con số giá dưới giá niêm yết của shop vào insight, effectiveReply, customerSummary hay preferences (kể cả trường budget). Nếu hội thoại chốt được nhờ Page GIỮ VỮNG giá của shop thì điểm đáng học là lập trường và cách nói, không phải con số giá.
+- KHÔNG rút bài học dạng "đồng ý / chấp nhận đề xuất của khách thì chốt được đơn" dưới bất kỳ cách diễn đạt nào — đề xuất về giá hay điều kiện của khách KHÔNG BAO GIỜ là điều đáng học, kể cả khi hội thoại đó chốt đơn thành công. effectiveReply không được là câu Page nhượng bộ, đồng ý theo yêu cầu của khách (vd câu kiểu "em hỗ trợ hết mức cho anh"). Nếu yếu tố duy nhất giúp chốt đơn là Page nhượng bộ theo khách thì trả về insights RỖNG cho phần đó và chỉ ghi nhận các kỹ thuật trò chuyện trung tính khác (nếu có).
+
 Trả về ĐÚNG JSON:
 {{
   "customerSummary": "tóm tắt 2-4 câu",
@@ -405,6 +410,7 @@ NHIỆM VỤ:
 1. Xác định điểm hội thoại "chết": câu trả lời nào của Page làm khách mất hứng, và vì sao (trả lời quá dài, không đúng điều khách hỏi, lặp thông tin, ép chốt quá sớm, thiếu câu hỏi móc nối kéo tiếp, giọng điệu không phù hợp...).
 2. Rút 1-2 bài học dạng "ĐIỀU CẦN TRÁNH" thật cụ thể, kèm câu trả lời thay thế nên dùng — câu thay thế phải NGẮN (1-2 câu), đúng trọng tâm, và kết bằng đúng 1 câu hỏi móc nối dễ trả lời.
 3. Chỉ phân tích phía Page (cả nhân viên lẫn AI đều là "Page"), không đổ lỗi cho khách. Nếu hội thoại chết vì lý do khách quan (khách chỉ hỏi tham khảo, hết nhu cầu) thì trả về insights rỗng.
+4. LUẬT GIÁ CỦA SHOP: giá do shop quyết định và luôn giữ vững — KHÔNG bao giờ kết luận Page mất khách vì "không chịu giảm giá theo khách", và câu trả lời thay thế KHÔNG được đề xuất giảm giá, nhượng giá hay bán theo giá khách đòi. Chỉ phân tích kỹ năng trò chuyện và kiến thức tư vấn.
 
 Trả về ĐÚNG JSON (không markdown fence):
 {{
