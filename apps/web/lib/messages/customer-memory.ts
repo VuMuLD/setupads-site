@@ -98,10 +98,21 @@ const VN_PROVINCES = [
   "an giang", "kien giang", "hau giang", "soc trang", "bac lieu", "ca mau",
 ];
 
+/** Câu mặc cả giá KHÔNG phải địa chỉ giao hàng: "600 có được thì mua" từng bị
+ * rule số nhà (dòng bắt đầu bằng số) bắt thành địa chỉ → sinh đơn ảo
+ * #DH-20261105-002 cho khách chưa hề đồng ý giá. Chặn các dòng mặc cả TRƯỚC
+ * mọi rule nhận diện địa chỉ bên dưới. */
+const HAGGLE_LINE =
+  /(co duoc thi mua|duoc thi mua|co duoc khong|duoc khong|co duoc ko|duoc ko|co ban khong|ban duoc khong|ban ko|gia do thi|chot gia|tra gia|mac ca|giam gia|giam ko|bot them|bot khong|bot ko|freeship khong|mien ship khong)/;
+
 /** Nhận diện 1 dòng tin nhắn có phải địa chỉ giao hàng không — kể cả khi
  * khách gõ thiếu dấu/không có từ khóa chuẩn, vd "Khu 2 đại phạm hạ Hòa phú Thọ"
  * (đơn #DH-20261103-002 từng bị mất địa chỉ vì dòng này không khớp từ khóa cũ). */
 function looksLikeAddressLine(line: string): boolean {
+  const strippedLine = stripVnDiacritics(line).toLowerCase();
+  if (HAGGLE_LINE.test(strippedLine)) return false;
+  // "600k ..." ở đầu dòng là giá tiền, không phải số nhà
+  if (/^\d{3}\s*k\b/.test(strippedLine)) return false;
   if (ADDRESS_KEYWORDS.test(line)) return true;
   if (/^\d+[\s,/]/.test(line)) return true;
   const n = stripVnDiacritics(line).replace(/[.,]/g, " ");
