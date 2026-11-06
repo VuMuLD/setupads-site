@@ -122,13 +122,23 @@ async function autoReplyToInbound(
     return false;
   }
 
-  // Hội thoại đã có đơn hay chưa — quyết định chế độ trả lời ở dưới:
-  // đã chốt đơn thì bot chỉ hỗ trợ sau mua, tuyệt đối không bán/pitch nữa
-  // (chủ shop chốt 2026-11-03: "khách chốt rồi mà còn nhắn vậy là spam").
+  // Hội thoại đã có đơn (chưa hủy) hay chưa — quyết định chế độ trả lời:
   const existingOrder = await prisma.pageCustomerOrder.findFirst({
-    where: { conversationId },
+    where: { conversationId, status: { not: "cancelled" } },
     select: { id: true },
   });
+
+  // LUẬT IM LẶNG SAU ĐƠN (chủ shop chốt 2026-11-06): khách đã chốt và gửi
+  // SĐT + địa chỉ → Page gửi phiếu xác nhận, sau đó bot KHÔNG nhắn thêm bất
+  // cứ tin nào nữa trong hội thoại này — không tư vấn, không upsell, không
+  // trả lời tự động; khách nhắn tiếp thì nhân viên tự xử lý. (Thay chế độ
+  // "purchased" hỗ trợ sau mua của 2026-11-03.)
+  if (existingOrder) {
+    console.info(
+      `[syncPageMessages] Hội thoại ${conversationId} đã có đơn — bot im lặng theo luật chủ shop`
+    );
+    return false;
+  }
 
   // Đã chốt đơn + tin chỉ là đính kèm không chữ → im lặng, không pitch nữa
   const inboundText = (msgRow?.text || message.text || "").trim();

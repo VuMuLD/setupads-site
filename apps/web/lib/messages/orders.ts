@@ -275,17 +275,9 @@ export async function sendOrderConfirmation(
     text,
   });
 
-  // Tin xác nhận đã gửi xong → gửi tiếp câu chốt thành 1 tin riêng.
-  // Lỗi ở tin chốt không được làm hỏng trạng thái xác nhận của đơn.
-  try {
-    await sendConversationReply({
-      conversationId: order.conversationId,
-      userId,
-      text: ORDER_CLOSING_MESSAGE,
-    });
-  } catch (err) {
-    console.error("[sendOrderConfirmation] closing send failed:", err);
-  }
+  // LUẬT 2026-11-06 (chủ shop): sau phiếu xác nhận KHÔNG gửi thêm tin nào
+  // nữa — bỏ hẳn câu chốt riêng từng gửi sau phiếu (ORDER_CLOSING_MESSAGE
+  // không còn được dùng).
 
   await prisma.pageCustomerOrder.update({
     where: { id: order.id },
