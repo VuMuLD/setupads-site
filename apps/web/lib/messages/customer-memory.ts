@@ -14,6 +14,23 @@ const ADDRESS_EXTRACT =
 const SIZE_EXTRACT = /(?:size|sz)\s*:?\s*([a-z0-9]+)/i;
 const QTY_EXTRACT = /(?:lấy|mua|đặt|sl)\s*:?\s*(\d+)/i;
 
+/** Số lượng chỉ hợp lệ khi NHỎ và không dính đơn vị tiền. Câu "lấy 600 nha
+ * shop" là khách mặc cả 600k, không phải mua 600 bộ — đơn ảo #DH-20261105-004
+ * từng ghi số lượng 600 = 407.400.000đ vì bắt thẳng số sau động từ mua/lấy. */
+function extractQuantity(allInbound: string): number | null {
+  const m = allInbound.match(QTY_EXTRACT);
+  if (!m?.[1]) return null;
+  const after = allInbound.slice(
+    (m.index ?? 0) + m[0].length,
+    (m.index ?? 0) + m[0].length + 8
+  );
+  // Số kèm đơn vị tiền ngay sau (600k, 600 nghìn...) là GIÁ, không phải số lượng
+  if (/^\s*(k|nghìn|ngàn|tr|triệu|đ|₫)/i.test(after)) return null;
+  const qty = parseInt(m[1], 10);
+  if (!Number.isFinite(qty) || qty < 1 || qty > 20) return null;
+  return qty;
+}
+
 export interface CustomerPreferences {
   size?: string;
   color?: string;
@@ -232,7 +249,6 @@ export function extractCustomerInfoFromMessages(
   const phone = extractPhoneFromText(allInbound);
   const address = extractAddressFromInbound(allInbound);
   const sizeMatch = allInbound.match(SIZE_EXTRACT);
-  const qtyMatch = allInbound.match(QTY_EXTRACT);
 
   const preferences: CustomerPreferences = {};
   if (sizeMatch?.[1]) preferences.size = sizeMatch[1];
@@ -251,7 +267,7 @@ export function extractCustomerInfoFromMessages(
     phone,
     address,
     size: sizeMatch?.[1] || null,
-    quantity: qtyMatch?.[1] ? parseInt(qtyMatch[1], 10) : null,
+    quantity: extractQuantity(allInbound),
     productSummary,
     amount: null,
     preferences,
