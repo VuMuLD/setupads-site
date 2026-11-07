@@ -273,12 +273,19 @@ export async function learnFromConversation(
       where: { id: conversation.pageId },
       select: { aiConsultingInsights: true },
     });
+    type ConsultingTip = { stage?: string; tip: string; pinned?: boolean };
     const existing = Array.isArray(page?.aiConsultingInsights)
-      ? (page!.aiConsultingInsights as Array<{ stage?: string; tip: string }>)
+      ? (page!.aiConsultingInsights as ConsultingTip[])
       : [];
-    const merged = [...aiResult.pageTips, ...existing]
-      .filter((t, i, arr) => arr.findIndex((x) => x.tip === t.tip) === i)
-      .slice(0, 20);
+    // Tip GHIM (luật chủ shop chốt) không bao giờ bị tip học tự động đẩy ra:
+    // luôn giữ lại và đặt lên đầu; chỉ phần tip thường mới cắt ở 20 tip gần nhất.
+    const pinned = existing.filter((t) => t.pinned);
+    const merged = [
+      ...pinned,
+      ...[...aiResult.pageTips, ...existing.filter((t) => !t.pinned)]
+        .filter((t, i, arr) => arr.findIndex((x) => x.tip === t.tip) === i)
+        .slice(0, 20),
+    ];
     await prisma.page.update({
       where: { id: conversation.pageId },
       data: { aiConsultingInsights: merged },

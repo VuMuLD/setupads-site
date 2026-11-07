@@ -84,11 +84,11 @@ export function getConsultingPlan(stage: ConsultingStage): string {
   const plans: Record<ConsultingStage, string> = {
     greeting: [
       "1. Chào khách thân thiện, giới thiệu ngắn shop đang có gì",
-      "2. Hỏi 1 câu mở: khách đang tìm sản phẩm gì / dùng cho ai",
+      "2. Nếu shop chỉ bán 1 sản phẩm duy nhất → giới thiệu thẳng sản phẩm đó (tên + giá + ưu đãi chính), TUYỆT ĐỐI không hỏi khách đang tìm/quan tâm sản phẩm gì; chỉ khi shop bán nhiều sản phẩm mới hỏi 1 câu mở khách đang tìm gì / dùng cho ai",
       "3. Chưa ép mua, chưa báo giá dồn dập",
     ].join("\n"),
     discovery: [
-      "1. Hỏi rõ nhu cầu: size, màu, ngân sách, dùng cho ai",
+      "1. Nếu shop chỉ bán 1 sản phẩm duy nhất → mặc định mọi câu hỏi của khách là về sản phẩm đó, tư vấn thẳng sản phẩm đó, chỉ hỏi nhu cầu gắn với chính sản phẩm đó (VD: nhà dùng bếp từ hay bếp ga, nấu cho mấy người), TUYỆT ĐỐI không hỏi khách đang quan tâm sản phẩm/bộ nào; shop bán nhiều sản phẩm mới hỏi rõ nhu cầu: size, màu, ngân sách, dùng cho ai",
       "2. Lắng nghe trước — ghi nhận câu trả lời của khách",
       "3. Hỏi thêm 1 câu để hiểu sâu hơn (VD: thích form rộng hay ôm?)",
       "4. Khi đủ thông tin → chuyển sang giới thiệu SP phù hợp",
@@ -147,9 +147,9 @@ export function getConsultingPlan(stage: ConsultingStage): string {
 export function getStageGuidance(stage: ConsultingStage): string {
   const guidance: Record<ConsultingStage, string> = {
     greeting:
-      "Khách mới nhắn. Chào ấm áp, tạo cảm giác được lắng nghe. Hỏi 1 câu mở để bắt chuyện — KHÔNG bán ngay.",
+      "Khách mới nhắn. Chào ấm áp, tạo cảm giác được lắng nghe. Nếu shop chỉ bán 1 sản phẩm duy nhất → giới thiệu thẳng sản phẩm đó (tên + giá + ưu đãi chính) và hỏi 1 câu mở gắn với chính sản phẩm đó (VD: nhà mình dùng bếp từ hay bếp ga ạ), TUYỆT ĐỐI không hỏi khách đang tìm/quan tâm sản phẩm gì. Chỉ khi shop bán nhiều sản phẩm mới hỏi 1 câu mở để bắt chuyện — KHÔNG bán ngay.",
     discovery:
-      "Đang tìm hiểu nhu cầu. Ưu tiên HỎI hơn NÓI. Mỗi tin nhắn nên có ít nhất 1 câu hỏi để hiểu khách.",
+      "Đang tìm hiểu nhu cầu. Nếu shop chỉ bán 1 sản phẩm duy nhất → mặc định mọi câu hỏi của khách là về sản phẩm đó: tư vấn thẳng sản phẩm đó, câu hỏi chỉ để hiểu cách khách dùng chính sản phẩm đó, TUYỆT ĐỐI không hỏi khách đang quan tâm sản phẩm/bộ nào. Shop bán nhiều sản phẩm: ưu tiên HỎI hơn NÓI, mỗi tin nhắn nên có ít nhất 1 câu hỏi để hiểu khách.",
     recommendation:
       "Khách đã có nhu cầu hoặc hỏi giá/SP. Giới thiệu cụ thể, gửi ảnh, nêu giá. Kết bằng câu hỏi xác nhận.",
     objection:
