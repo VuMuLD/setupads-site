@@ -85,19 +85,19 @@ export function getConsultingPlan(stage: ConsultingStage): string {
     greeting: [
       "1. Chào khách thân thiện, giới thiệu ngắn shop đang có gì",
       "2. Nếu shop chỉ bán 1 sản phẩm duy nhất → giới thiệu thẳng sản phẩm đó (tên + giá + ưu đãi chính), TUYỆT ĐỐI không hỏi khách đang tìm/quan tâm sản phẩm gì; chỉ khi shop bán nhiều sản phẩm mới hỏi 1 câu mở khách đang tìm gì / dùng cho ai",
-      "3. Chưa ép mua, chưa báo giá dồn dập",
+      "3. Thứ tự câu đầu: báo giá 699k trước → kèm 'được kiểm tra hàng trước khi nhận' + miễn phí ship → kết bằng 1 câu mời chào ngắn; mỗi ý 1 dòng riêng, thật ngắn; chỉ gọi khách anh/chị, TUYỆT ĐỐI không nhắc tên khách",
     ].join("\n"),
     discovery: [
       "1. Nếu shop chỉ bán 1 sản phẩm duy nhất → mặc định mọi câu hỏi của khách là về sản phẩm đó, tư vấn thẳng sản phẩm đó, chỉ hỏi nhu cầu gắn với chính sản phẩm đó (VD: nhà dùng bếp từ hay bếp ga, nấu cho mấy người), TUYỆT ĐỐI không hỏi khách đang quan tâm sản phẩm/bộ nào; shop bán nhiều sản phẩm mới hỏi rõ nhu cầu: size, màu, ngân sách, dùng cho ai",
       "2. Lắng nghe trước — ghi nhận câu trả lời của khách",
-      "3. Hỏi thêm 1 câu để hiểu sâu hơn (VD: thích form rộng hay ôm?)",
+      "3. Kết bằng 1 câu mời chào/hỏi ngắn gắn với sản phẩm (VD: nhà mình dùng bếp từ hay bếp ga ạ?)",
       "4. Khi đủ thông tin → chuyển sang giới thiệu SP phù hợp",
     ].join("\n"),
     recommendation: [
       "1. Gợi ý 1–2 sản phẩm phù hợp nhất (không liệt kê hết)",
-      "2. Nêu giá rõ ràng + 1–2 lợi ích nổi bật",
+      "2. Báo GIÁ 699.000đ (giá gốc 1.200.000đ) ngay dòng đầu, dòng tiếp theo: 'được kiểm tra hàng trước khi nhận' + miễn phí ship; không liệt kê tính năng dài dòng",
       "3. Gửi ảnh sản phẩm (sendImages) để khách xem trực quan",
-      "4. Kết bằng câu hỏi nhẹ: size/màu khách thích không?",
+      "4. Kết bằng 1 câu mời chào ngắn (VD: anh/chị lấy 1 bộ, em lên đơn cho mình nhé?)",
     ].join("\n"),
     objection: [
       "1. Đồng cảm trước (em hiểu ạ / nhiều khách cũng hỏi vậy)",
@@ -147,11 +147,11 @@ export function getConsultingPlan(stage: ConsultingStage): string {
 export function getStageGuidance(stage: ConsultingStage): string {
   const guidance: Record<ConsultingStage, string> = {
     greeting:
-      "Khách mới nhắn. Chào ấm áp, tạo cảm giác được lắng nghe. Nếu shop chỉ bán 1 sản phẩm duy nhất → giới thiệu thẳng sản phẩm đó (tên + giá + ưu đãi chính) và hỏi 1 câu mở gắn với chính sản phẩm đó (VD: nhà mình dùng bếp từ hay bếp ga ạ), TUYỆT ĐỐI không hỏi khách đang tìm/quan tâm sản phẩm gì. Chỉ khi shop bán nhiều sản phẩm mới hỏi 1 câu mở để bắt chuyện — KHÔNG bán ngay.",
+      "Khách mới nhắn. Chào ấm áp, tạo cảm giác được lắng nghe. Nếu shop chỉ bán 1 sản phẩm duy nhất → giới thiệu thẳng sản phẩm đó (tên + giá + ưu đãi chính) và hỏi 1 câu mở gắn với chính sản phẩm đó (VD: nhà mình dùng bếp từ hay bếp ga ạ), TUYỆT ĐỐI không hỏi khách đang tìm/quan tâm sản phẩm gì. Chỉ khi shop bán nhiều sản phẩm mới hỏi 1 câu mở để bắt chuyện — KHÔNG bán ngay. Câu đầu tiên của shop 1 sản phẩm: báo giá 699.000đ trước, ngay sau đó 'được kiểm tra hàng trước khi nhận' + miễn phí ship, mỗi ý 1 dòng, kết bằng 1 câu mời chào; chỉ gọi anh/chị, không nhắc tên khách.",
     discovery:
-      "Đang tìm hiểu nhu cầu. Nếu shop chỉ bán 1 sản phẩm duy nhất → mặc định mọi câu hỏi của khách là về sản phẩm đó: tư vấn thẳng sản phẩm đó, câu hỏi chỉ để hiểu cách khách dùng chính sản phẩm đó, TUYỆT ĐỐI không hỏi khách đang quan tâm sản phẩm/bộ nào. Shop bán nhiều sản phẩm: ưu tiên HỎI hơn NÓI, mỗi tin nhắn nên có ít nhất 1 câu hỏi để hiểu khách.",
+      "Đang tìm hiểu nhu cầu. Nếu shop chỉ bán 1 sản phẩm duy nhất → mặc định mọi câu hỏi của khách là về sản phẩm đó: tư vấn thẳng sản phẩm đó, câu hỏi chỉ để hiểu cách khách dùng chính sản phẩm đó, TUYỆT ĐỐI không hỏi khách đang quan tâm sản phẩm/bộ nào. Shop bán nhiều sản phẩm: ưu tiên HỎI hơn NÓI, mỗi tin nhắn nên có ít nhất 1 câu hỏi để hiểu khách. Shop 1 sản phẩm, lượt tư vấn đầu: báo giá 699.000đ trước kèm 'được kiểm tra hàng trước khi nhận' + miễn phí ship, mỗi ý 1 dòng, kết bằng 1 câu mời chào; chỉ gọi anh/chị, không nhắc tên khách.",
     recommendation:
-      "Khách đã có nhu cầu hoặc hỏi giá/SP. Giới thiệu cụ thể, gửi ảnh, nêu giá. Kết bằng câu hỏi xác nhận.",
+      "Khách đã có nhu cầu hoặc hỏi giá/SP. Báo giá 699.000đ ngay dòng đầu, dòng tiếp theo 'được kiểm tra hàng trước khi nhận' + miễn phí ship, gửi ảnh, mỗi ý 1 dòng, kết bằng 1 câu mời chào ngắn. Chỉ gọi anh/chị, không nhắc tên khách.",
     objection:
       "Khách đang do dự hoặc phàn nàn. Đồng cảm trước, giải thích ngắn, dùng social proof (ảnh khách mua).",
     closing:

@@ -42,14 +42,27 @@ function formatVnDate(d: Date): string {
 
 export async function generateOrderCode(pageId: string): Promise<string> {
   const now = new Date();
-  const count = await prisma.pageCustomerOrder.count({
-    where: {
-      pageId,
-      confirmedAt: { gte: startOfDay(now), lte: endOfDay(now) },
-    },
-  });
+  // Đếm theo TIỀN TỐ MÃ (DH-<ngày>-): MỌI đơn đã mang mã của ngày đó trong
+  // Page, kể cả đơn received chưa xác nhận. Cách cũ đếm theo confirmedAt
+  // trong cửa sổ ngày-local, còn mã lại lấy ngày UTC (toISOString) — đơn tạo
+  // 7/11 01:02 VN mang mã 20261106 nhưng rơi ngoài cửa sổ đếm ngày 7/11 nên
+  // cùng ra 001 với đơn 6/11 (sự cố trùng mã DH-20261106-001 ở Bếp Việt).
+  // Đếm theo tiền tố thì ngày đếm và ngày trong mã là một, không lệch múi giờ.
   const dateStr = now.toISOString().slice(0, 10).replace(/-/g, "");
-  return `DH-${dateStr}-${String(count + 1).padStart(3, "0")}`;
+  const count = await prisma.pageCustomerOrder.count({
+    where: { pageId, orderCode: { startsWith: `DH-${dateStr}-` } },
+  });
+  let seq = count + 1;
+  // Chốt chặn cuối: mã phải duy nhất trong Page — mã đã tồn tại thì tăng tiếp.
+  for (;;) {
+    const code = `DH-${dateStr}-${String(seq).padStart(3, "0")}`;
+    const exists = await prisma.pageCustomerOrder.findFirst({
+      where: { pageId, orderCode: code },
+      select: { id: true },
+    });
+    if (!exists) return code;
+    seq += 1;
+  }
 }
 
 /** "Bếp Việt" → "BV", "Siêu Thị Gia Dụng" → "STGD" — ghi tắt Page theo form chốt đơn của chủ shop */
