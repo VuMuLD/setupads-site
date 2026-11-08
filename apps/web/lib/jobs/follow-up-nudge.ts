@@ -219,6 +219,7 @@ async function maybeNudge(
     conversationId: conv.id,
     userId: page.facebookAccount.userId,
     text,
+    stripCustomerName: true,
   });
 
   await prisma.$executeRawUnsafe(

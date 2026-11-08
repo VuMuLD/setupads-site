@@ -255,6 +255,7 @@ async function autoReplyToInbound(
     conversationId,
     userId,
     text: advice.reply,
+    stripCustomerName: true,
     imageUrls: [...productUrls, ...customerUrls],
   });
 

@@ -7,12 +7,16 @@ import {
   toAbsoluteImageUrl,
 } from "@/lib/messages/product-images";
 import type { MessageDirection } from "@prisma/client";
+import { stripCustomerName } from "@/lib/messages/strip-customer-name";
 
 export interface SendReplyOptions {
   conversationId: string;
   userId: string;
   text: string;
   imageUrls?: string[];
+  // Tin AI soạn: gọt tên khách khỏi câu trả lời trước khi gửi
+  // (luật xưng hô 2026-11-08). Phiếu xác nhận/tin nhân viên: để false.
+  stripCustomerName?: boolean;
   messagingType?: "RESPONSE" | "MESSAGE_TAG";
   tag?: "POST_PURCHASE_UPDATE" | "CONFIRMED_EVENT_UPDATE" | "ACCOUNT_UPDATE";
 }
@@ -57,7 +61,7 @@ export function formatMessengerSendError(err: unknown): string {
 export async function sendConversationReply(
   options: SendReplyOptions
 ): Promise<SendReplyResult> {
-  const text = options.text.trim();
+  let text = options.text.trim();
   // Luật của chủ Page (2026-11-03): mỗi lượt gửi tối đa 2 ảnh — không gửi nhiều hơn.
   const imageUrls = normalizeUrls(options.imageUrls || []).slice(0, 2);
 
@@ -75,6 +79,10 @@ export async function sendConversationReply(
 
   if (!conversation?.participantFbId) {
     throw new Error("Không tìm thấy khách hàng để gửi tin");
+  }
+
+  if (options.stripCustomerName && conversation.participantName) {
+    text = stripCustomerName(text, conversation.participantName);
   }
 
   const pageToken = await getPageAccessToken(options.userId, conversation.pageId);

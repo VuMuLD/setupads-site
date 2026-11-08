@@ -281,6 +281,7 @@ export async function runDailyRepitch(options: {
             conversationId: cand.conversationId,
             userId: page.facebookAccount.userId,
             text,
+            stripCustomerName: true,
           });
           await prisma.$executeRawUnsafe(
             "INSERT INTO page_conversation_nudges (id, conversation_id, anchor_message_id, step) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE id = id",
