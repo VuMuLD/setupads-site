@@ -124,7 +124,7 @@ export function getConsultingPlan(stage: ConsultingStage): string {
     ].join("\n"),
     follow_up_offer: [
       "1. Khách im lặng nửa ngày — tóm gọn lại đề nghị: giá + freeship",
-      "2. Hạ rào cản: COD kiểm tra hàng ưng mới trả tiền, đổi trả dễ, bảo hành rõ ràng",
+      "2. Hạ rào cản: COD kiểm tra hàng ưng mới trả tiền (miễn phí kiểm tra), đổi trả 7 ngày theo nhà sản xuất; TUYỆT ĐỐI không nhắc bảo hành — sản phẩm không có bảo hành",
       "3. Hỏi chốt nhẹ 1 câu (VD: em giữ 1 bộ cho mình nhé?)",
       "4. Không dọa hết hàng, không giục giã",
     ].join("\n"),
@@ -135,7 +135,7 @@ export function getConsultingPlan(stage: ConsultingStage): string {
       "4. TUYỆT ĐỐI không ép chốt, không hỏi xin thông tin",
     ].join("\n"),
     purchased: [
-      "1. Khách ĐÃ CHỐT ĐƠN — chỉ hỗ trợ sau mua: giao hàng, kiểm tra hàng, đổi trả, bảo hành, cách dùng",
+      "1. Khách ĐÃ CHỐT ĐƠN — chỉ hỗ trợ sau mua: giao hàng, kiểm tra hàng, đổi trả 7 ngày theo nhà sản xuất, cách dùng; TUYỆT ĐỐI không nhắc bảo hành (sản phẩm không có bảo hành)",
       "2. Trả lời ĐÚNG câu khách hỏi, 1 câu ngắn gọn — xong là dừng",
       "3. Nếu khách chỉ cảm ơn/xác nhận (ok, dạ, cảm ơn...) → đáp lại 1 câu cảm ơn ngắn, KHÔNG nói thêm gì nữa",
       "4. TUYỆT ĐỐI không nhắc lại giá/ưu đãi, không giới thiệu sản phẩm, không gửi ảnh, không móc nối chốt đơn, không xin lại SĐT/địa chỉ",
