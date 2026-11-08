@@ -52,15 +52,18 @@ export function isPricePoisonedLearning(
   if (!blob) return false;
   const plain = stripVnLower(blob);
   if (CONCESSION_PHRASES.some((p) => plain.includes(p))) return true;
-  // Luật chính sách 8/11: sản phẩm KHÔNG có bảo hành — bài học/tip nào
-  // hứa bảo hành là dữ liệu độc, loại bỏ. (Câu phủ định kiểu "khong co
-  // bao hanh" là đúng luật, không khớp các mẫu khẳng định dưới đây.)
+  // Luật chính sách 8/11 (sửa 21:25): bot TUYỆT ĐỐI không nhắc tới bảo
+  // hành — bài học/tip nào hứa bảo hành HOẶC phủ nhận bảo hành ("khong
+  // co bao hanh") đều là dữ liệu độc, loại bỏ. Cách đáp đúng luật là
+  // bỏ qua ý bảo hành, chỉ nói đổi trả 7 ngày + kiểm hàng miễn phí.
   const WARRANTY_CLAIM_PHRASES = [
     "bao hanh 12 thang",
     "bao hanh chinh hang",
     "bao hanh uy tin",
     "bao hanh 1 doi 1",
     "chinh sach bao hanh",
+    "khong co bao hanh",
+    "khong kem bao hanh",
   ];
   if (WARRANTY_CLAIM_PHRASES.some((p) => plain.includes(p))) return true;
   // Bắt số tiền NGUYÊN CỤM (1.200.000 / 699.000 / 699k) để giá gốc 1.200.000đ
