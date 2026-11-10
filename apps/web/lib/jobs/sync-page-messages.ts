@@ -93,6 +93,37 @@ export function isAckOnlyMessage(
   });
 }
 
+/** Đợt tin dồn (vá 10/11, ca Hong Đang): khách gửi nhiều tin ngắn liên
+ * tiếp, mỗi tin một lượt sync chạy song song — bot trả lời TỪNG tin nên
+ * khách nhận 2-3 tin chồng nhau, lặp lại cùng một ý (xin SĐT/địa chỉ
+ * 2 lần trong 2 giây). Rule: nếu đã có tin inbound MỚI HƠN (có nội dung
+ * trả lời được) chưa được AI trả lời, bỏ qua tin cũ — tin mới nhất của
+ * đợt sẽ trả lời một lần với đầy đủ ngữ cảnh. */
+async function findNewerUnansweredInbound(
+  conversationId: string,
+  message: { id: string; sentAt: Date }
+) {
+  const candidates = await prisma.pageMessage.findMany({
+    where: {
+      conversationId,
+      direction: "INBOUND",
+      aiSuggestedReply: null,
+      OR: [
+        { sentAt: { gt: message.sentAt } },
+        { sentAt: message.sentAt, id: { gt: message.id } },
+      ],
+    },
+    select: { id: true, text: true, attachments: true },
+    take: 10,
+  });
+  return candidates.find(
+    (c) =>
+      Boolean(c.text) &&
+      c.text !== "[Đính kèm]" &&
+      !isAckOnlyMessage(c.text, c.attachments)
+  );
+}
+
 async function autoReplyToInbound(
   page: { id: string; autoAiEnabled: boolean },
   conversationId: string,
@@ -109,6 +140,14 @@ async function autoReplyToInbound(
     },
   });
   if (alreadyReplied) return false;
+
+  // Gộp đợt tin (kiểm tra sớm): tin mới hơn trong đợt sẽ trả lời thay.
+  if (await findNewerUnansweredInbound(conversationId, message)) {
+    console.info(
+      `[syncPageMessages] Gộp đợt tin: bỏ qua tin ${message.id} vì có tin mới hơn chưa trả lời (hội thoại ${conversationId})`
+    );
+    return false;
+  }
 
   // Không pitch cho tin chỉ là 👍/sticker/emoji xác nhận — không có gì để trả
   // lời mà gửi bài pitch giá là spam, kể cả trước lẫn sau khi chốt đơn.
@@ -262,6 +301,30 @@ async function autoReplyToInbound(
       "[syncPageMessages] Hoi thoai " + conversationId + " da du " +
         MAX_IMAGE_ROUNDS_PER_CONVERSATION + " luot gui anh - chi gui text"
     );
+  }
+
+  // Chốt chặn cuối TRƯỚC KHI GỬI (vá gộp đợt tin 10/11): trong lúc AI
+  // soạn trả lời, một lượt sync song song có thể đã trả lời rồi, hoặc
+  // khách đã nhắn thêm tin mới hơn — gửi nữa là chồng tin/lặp ý.
+  const repliedMeanwhile = await prisma.pageMessage.findFirst({
+    where: {
+      conversationId,
+      direction: "OUTBOUND",
+      sentAt: { gt: message.sentAt },
+    },
+    select: { id: true },
+  });
+  if (repliedMeanwhile) {
+    console.info(
+      `[syncPageMessages] Gộp đợt tin: không gửi trả lời cho tin ${message.id} vì đã có trả lời mới hơn (hội thoại ${conversationId})`
+    );
+    return false;
+  }
+  if (await findNewerUnansweredInbound(conversationId, message)) {
+    console.info(
+      `[syncPageMessages] Gộp đợt tin: không gửi trả lời cho tin ${message.id} vì khách đã nhắn tin mới hơn (hội thoại ${conversationId})`
+    );
+    return false;
   }
 
   await sendConversationReply({

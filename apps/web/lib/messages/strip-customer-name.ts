@@ -14,9 +14,11 @@ function escapeRegExp(s: string): string {
 /**
  * Remove the customer's name from an AI-composed reply.
  * - Removes the full name (case-insensitive, whole-phrase match).
- * - Removes "anh/chị/em + <last name token>" (e.g. "chị Hằng" -> "chị");
- *   the token match is case-sensitive so ordinary words like "hằng ngày"
- *   are never touched.
+ * - Removes "anh/chị/em + <any name token>" (e.g. "chị Hằng" -> "chị",
+ *   "anh Hong" -> "anh"); the token match is case-sensitive so ordinary
+ *   words like "hằng ngày" are never touched. (Originally only the LAST
+ *   token was stripped; the AI also addresses customers by the FIRST
+ *   token — "anh Hong ơi" leaked on 2026-11-10.)
  * - Tidies leftover double spaces / dangling vocatives.
  * - If stripping would empty the text, returns the original text.
  */
@@ -37,13 +39,14 @@ export function stripCustomerName(
   );
   out = out.replace(fullNameRe, "");
 
-  // 2) Title + last token, e.g. "chị Hằng" -> "chị". Case-sensitive token.
+  // 2) Title + ANY name token, e.g. "chị Hằng" -> "chị", "anh Hong" ->
+  //    "anh". Case-sensitive token match (see header note).
   const tokens = name.split(" ");
   if (tokens.length >= 2) {
-    const last = tokens[tokens.length - 1];
-    if (last.length >= 3) {
+    for (const token of Array.from(new Set(tokens))) {
+      if (token.length < 3) continue;
       const titleRe = new RegExp(
-        `\\b(anh|chị|em)(\\s+)${escapeRegExp(last)}(?![\\p{L}\\p{N}])`,
+        `\\b(anh|chị|em|Anh|Chị|Em)(\\s+)${escapeRegExp(token)}(?![\\p{L}\\p{N}])`,
         "gu"
       );
       out = out.replace(titleRe, "$1");
