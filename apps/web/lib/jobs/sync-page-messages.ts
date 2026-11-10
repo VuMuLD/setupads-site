@@ -19,6 +19,7 @@ import {
   resolveProductImageUrls,
   sendConversationReply,
 } from "@/lib/messages/send-page-reply";
+import { customerAskedForPhotos } from "@/lib/messages/photo-request";
 import type { MessageDirection } from "@prisma/client";
 
 const DEFAULT_CONVERSATION_LIMIT = 20;
@@ -213,9 +214,13 @@ async function autoReplyToInbound(
   const imageRoundsSent = new Set(
     sentImageMessages.map((m) => Math.floor(m.sentAt.getTime() / 10000))
   ).size;
-  // Đã có đơn thì KHÔNG gửi ảnh sản phẩm nữa — khách đã mua rồi
+  // Đã có đơn thì KHÔNG gửi ảnh sản phẩm nữa — khách đã mua rồi.
+  // Luật gửi ảnh (chủ shop 10/11): lượt ảnh đầu tiên tự kèm để mở màn;
+  // từ lượt thứ hai chỉ gửi khi khách xin xem ảnh — không spam ảnh.
   const maySendImages =
-    !existingOrder && imageRoundsSent < MAX_IMAGE_ROUNDS_PER_CONVERSATION;
+    !existingOrder &&
+    imageRoundsSent < MAX_IMAGE_ROUNDS_PER_CONVERSATION &&
+    (imageRoundsSent === 0 || customerAskedForPhotos(inboundText));
 
   let imageProductIds = existingOrder
     ? []
