@@ -122,12 +122,27 @@ const VN_PROVINCES = [
 const HAGGLE_LINE =
   /(co duoc thi mua|duoc thi mua|co duoc khong|duoc khong|co duoc ko|duoc ko|co ban khong|ban duoc khong|ban ko|gia do thi|chot gia|tra gia|mac ca|giam gia|giam ko|bot them|bot khong|bot ko|freeship khong|mien ship khong)/;
 
+/** Câu PHÀN NÀN về đơn/hàng đã giao KHÔNG phải địa chỉ: "Sao giao Bộ nồi
+ * không giống quản cáo vậy..." bị rule từ khóa quận (quan) trong
+ * looksLikeAddressLine bắt thành địa chỉ của đơn #DH-20261108-002 ("quản
+ * cáo" bỏ dấu thành "quan cao" — trùng từ khóa "quan"). Chặn các câu nói
+ * về hàng đã giao / lỗi hàng / đổi trả TRƯỚC mọi rule nhận diện địa chỉ
+ * bên dưới: gặp câu phàn nàn thì coi như CHƯA có địa chỉ, bot hỏi lại,
+ * tuyệt đối không đoán. */
+const COMPLAINT_LINE =
+  /(khong giong|quang cao|quan cao|khong dung hang|sai hang|hang sai|hang loi|loi hang|bi vo|bi meo|hoi meo|bi mop|bi hong|bi gay|bi nut|bi cham|bi thieu|bi sai|lan truoc|hom truoc|don truoc|don cu|giao truoc|da giao|giao roi|doi tra|tra hang|tra lai|hoan hang|doi hang|phan nan|khieu nai|khong hai long)/;
+
+function isComplaintText(s: string): boolean {
+  return COMPLAINT_LINE.test(stripVnDiacritics(s).toLowerCase());
+}
+
 /** Nhận diện 1 dòng tin nhắn có phải địa chỉ giao hàng không — kể cả khi
  * khách gõ thiếu dấu/không có từ khóa chuẩn, vd "Khu 2 đại phạm hạ Hòa phú Thọ"
  * (đơn #DH-20261103-002 từng bị mất địa chỉ vì dòng này không khớp từ khóa cũ). */
 function looksLikeAddressLine(line: string): boolean {
   const strippedLine = stripVnDiacritics(line).toLowerCase();
   if (HAGGLE_LINE.test(strippedLine)) return false;
+  if (COMPLAINT_LINE.test(strippedLine)) return false;
   // "600k ..." ở đầu dòng là giá tiền, không phải số nhà
   if (/^\d{3}\s*k\b/.test(strippedLine)) return false;
   if (ADDRESS_KEYWORDS.test(line)) return true;
@@ -139,21 +154,41 @@ function looksLikeAddressLine(line: string): boolean {
   return VN_PROVINCES.some((p) => padded.includes(` ${p} `));
 }
 
+/** Cắt phần câu chuyện trò TRƯỚC địa chỉ thật: khách hay gõ cả câu
+ * "Rồi em cam kết rồi đó nha số nhà chị 29 đường..." — chỉ giữ từ
+ * mốc địa chỉ đầu tiên (số nhà/đường/phường...) trở đi, bỏ luôn đại
+ * từ sở hữu sau "số nhà" (ca Kim Ngọc, đơn #DH-20261110-005). */
+const ADDRESS_ANCHOR =
+  /(số\s*nhà|số\s*\d+|địa\s*chỉ|đường|phố|ngõ|hẻm|thôn|ấp|xóm|tổ\s*\d+|khu\s*phố|phường|xã|quận|huyện|tỉnh|thành\s*phố)/i;
+
+function trimToAddressAnchor(line: string): string {
+  const m = line.match(ADDRESS_ANCHOR);
+  if (m && m.index && m.index > 0) {
+    return line
+      .slice(m.index)
+      .replace(/^số nhà (chị|anh|em|tôi|mình)\s+/i, "số nhà ")
+      .trim();
+  }
+  return line;
+}
+
 function extractAddressFromInbound(allInbound: string): string | null {
   const labeled = extractAddressFromText(allInbound);
-  if (labeled) return labeled;
+  if (labeled && !isComplaintText(labeled)) return labeled;
 
   const shipMatch = allInbound.match(
     /(?:ship|giao|nhận)\s*(?:về|đến|tại|ở)\s*:?\s*([^\n.!?]{10,220})/i
   );
-  if (shipMatch?.[1]) return shipMatch[1].trim();
+  if (shipMatch?.[1] && !isComplaintText(shipMatch[1])) return shipMatch[1].trim();
 
   const lines = allInbound.split(/\n+/).map((l) => l.trim()).filter(Boolean);
   for (const line of lines.reverse()) {
     if (line.length < 12 || line.length > 220) continue;
     if (PHONE_EXTRACT.test(line) && line.replace(/\D/g, "").length <= 11) continue;
     if (looksLikeAddressLine(line)) {
-      return line.replace(/^(địa\s*chỉ|dc|addr)\s*:?\s*/i, "").trim();
+      return trimToAddressAnchor(
+        line.replace(/^(địa\s*chỉ|dc|addr)\s*:?\s*/i, "").trim()
+      );
     }
   }
 

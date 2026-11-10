@@ -123,9 +123,17 @@ async function autoReplyToInbound(
     return false;
   }
 
-  // Hội thoại đã có đơn (chưa hủy) hay chưa — quyết định chế độ trả lời:
+  // Hội thoại đã có đơn HOÀN CHỈNH (chưa hủy, đủ SĐT + địa chỉ) hay
+  // chưa — quyết định chế độ trả lời. Đơn nháp thiếu thông tin KHÔNG
+  // tính là đã chốt (vá 10/11, ca #DH-20261110-005): bot vẫn trả lời
+  // bình thường để lấy đủ thông tin thay vì im lặng giữa chừng.
   const existingOrder = await prisma.pageCustomerOrder.findFirst({
-    where: { conversationId, status: { not: "cancelled" } },
+    where: {
+      conversationId,
+      status: { not: "cancelled" },
+      phone: { not: null },
+      address: { not: null },
+    },
     select: { id: true },
   });
 

@@ -455,11 +455,39 @@ export async function captureOrderFromConversation(
     });
   }
 
+  // Đơn cũ THIẾU thông tin (nháp rác từ đường học tập cũ) mà lần này đã
+  // trích đủ SĐT + địa chỉ (cổng tự động phía trên đã chặn thiếu) →
+  // hoàn thiện chính đơn cũ rồi xác nhận, không tạo đơn trùng, không
+  // để đơn nháp chặn mất đơn thật.
+  let completedExisting = false;
+  if (
+    !isNew &&
+    !options?.manual &&
+    !options?.force &&
+    (!order.phone || !order.address)
+  ) {
+    finalOrder = await prisma.pageCustomerOrder.update({
+      where: { id: order.id },
+      data: {
+        phone: extracted.phone || order.phone,
+        address: extracted.address || order.address,
+        size: extracted.size || order.size,
+        quantity: extracted.quantity || order.quantity,
+        productSummary: extracted.productSummary || order.productSummary,
+        amount: extracted.amount || order.amount,
+        ...(productIds ? { productIds } : {}),
+        participantName: conversation.participantName || order.participantName,
+      },
+    });
+    completedExisting = true;
+  }
+
   let confirmationSent = Boolean(finalOrder.confirmationSentAt);
   const hadConfirmation = confirmationSent;
 
   const shouldConfirm =
-    (isNew || (options?.manual && !confirmationSent)) && !options?.skipConfirm;
+    (isNew || completedExisting || (options?.manual && !confirmationSent)) &&
+    !options?.skipConfirm;
 
   if (shouldConfirm) {
     try {

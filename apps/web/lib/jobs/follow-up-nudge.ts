@@ -197,7 +197,12 @@ async function maybeNudge(
 
   // Đã chốt đơn từ hội thoại này thì không chăm sóc nữa
   const order = await prisma.pageCustomerOrder.findFirst({
-    where: { conversationId: conv.id },
+    where: {
+      conversationId: conv.id,
+      status: { not: "cancelled" },
+      phone: { not: null },
+      address: { not: null },
+    },
     select: { id: true },
   });
   if (order) return false;

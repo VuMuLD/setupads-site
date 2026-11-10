@@ -191,7 +191,12 @@ async function collectPage(
     }
 
     const order = await prisma.pageCustomerOrder.findFirst({
-      where: { conversationId: conv.id, status: { not: "cancelled" } },
+      where: {
+        conversationId: conv.id,
+        status: { not: "cancelled" },
+        phone: { not: null },
+        address: { not: null },
+      },
       select: { id: true },
     });
     if (order) {

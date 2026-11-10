@@ -4,12 +4,10 @@ import {
   extractCustomerInfoFromMessages,
   getOrCreatePageCustomer,
   linkConversationToCustomer,
-  recordCustomerOrder,
   shouldLearnFromConversation,
   syncCustomerProfileFromMessages,
   type CustomerPreferences,
 } from "@/lib/messages/customer-memory";
-import { detectCustomerPurchaseCommitment } from "@/lib/messages/purchase-detection";
 import { buildConsultingContext } from "@/lib/messages/consulting-flow";
 import { getManualLabelsFromDb } from "@/lib/messages/conversation-status";
 
@@ -154,18 +152,12 @@ export async function learnFromConversation(
     .reverse()
     .find((m) => m.direction === "OUTBOUND");
 
-  if (detectCustomerPurchaseCommitment(flowMessages) || manualPurchased) {
-    const lastInboundMsg = conversation.messages
-      .filter((m) => m.direction === "INBOUND")
-      .pop();
-    await recordCustomerOrder(
-      conversation.pageId,
-      customer.id,
-      conversation.id,
-      extracted,
-      lastInboundMsg?.id
-    );
-  }
+  // KHÔNG tạo đơn ở đường học tập (vá 10/11): nhánh này từng ghi thẳng
+  // một đơn "received" thiếu SĐT/giá vào page_customer_orders mỗi khi
+  // thấy dấu hiệu chốt — sinh đơn rác kiểu #DH-20261110-005 (chưa có
+  // SĐT vẫn "chốt") và kích hoạt nhầm luật im lặng sau đơn. Tạo đơn
+  // CHỈ qua captureOrderFromConversation (đủ cổng SĐT + địa chỉ +
+  // giá catalog + phiếu xác nhận).
 
   const history = conversation.messages.map((m) => ({
     role: m.direction === "INBOUND" ? "customer" : "page",
