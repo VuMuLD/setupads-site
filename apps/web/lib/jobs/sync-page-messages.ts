@@ -19,7 +19,10 @@ import {
   resolveProductImageUrls,
   sendConversationReply,
 } from "@/lib/messages/send-page-reply";
-import { customerAskedForPhotos } from "@/lib/messages/photo-request";
+import {
+  customerAskedForPhotos,
+  pickDetailPhotoFiles,
+} from "@/lib/messages/photo-request";
 import type { MessageDirection } from "@prisma/client";
 
 const DEFAULT_CONVERSATION_LIMIT = 20;
@@ -264,10 +267,16 @@ async function autoReplyToInbound(
   // Đã có đơn thì KHÔNG gửi ảnh sản phẩm nữa — khách đã mua rồi.
   // Luật gửi ảnh (chủ shop 10/11): lượt ảnh đầu tiên tự kèm để mở màn;
   // từ lượt thứ hai chỉ gửi khi khách xin xem ảnh — không spam ảnh.
+  // Ảnh chi tiết 12/11: khách hỏi CỤ THỂ 1 chi tiết (đáy/quánh/nồi 18cm/
+  // chảo/cận cảnh/kích thước) thì gửi đúng ảnh đó — ảnh là 1 phần câu trả
+  // lời, không phải spam. Trần 2 lượt/hội thoại vẫn giữ nguyên.
+  const detailPick = pickDetailPhotoFiles(inboundText, imageRoundsSent);
   const maySendImages =
     !existingOrder &&
     imageRoundsSent < MAX_IMAGE_ROUNDS_PER_CONVERSATION &&
-    (imageRoundsSent === 0 || customerAskedForPhotos(inboundText));
+    (imageRoundsSent === 0 ||
+      customerAskedForPhotos(inboundText) ||
+      (detailPick !== null && detailPick.specific));
 
   let imageProductIds = existingOrder
     ? []
@@ -290,7 +299,10 @@ async function autoReplyToInbound(
   let customerUrls: string[] = [];
   if (maySendImages) {
     [productUrls, customerUrls] = await Promise.all([
-      resolveProductImageUrls(page.id, imageProductIds, { maxPerProduct: 2 }),
+      resolveProductImageUrls(page.id, imageProductIds, {
+        maxPerProduct: 2,
+        preferredFiles: detailPick?.files,
+      }),
       resolveCustomerPhotoUrls(page.id, advice.sendCustomerPhotos || []),
     ]);
   } else if (

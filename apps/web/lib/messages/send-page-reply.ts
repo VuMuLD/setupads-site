@@ -173,18 +173,32 @@ export async function sendConversationReply(
 export async function resolveProductImageUrls(
   pageId: string,
   productIds: string[],
-  options?: { maxPerProduct?: number }
+  options?: { maxPerProduct?: number; preferredFiles?: string[] }
 ): Promise<string[]> {
   if (productIds.length === 0) return [];
 
   const maxPerProduct = options?.maxPerProduct ?? 3;
+  const preferredFiles = options?.preferredFiles ?? [];
   const products = await prisma.pageProduct.findMany({
     where: { pageId, id: { in: productIds }, isActive: true },
   });
 
   const urls: string[] = [];
   for (const product of products) {
-    urls.push(...getProductAllImages(product).slice(0, maxPerProduct));
+    const all = getProductAllImages(product);
+    const picked: string[] = [];
+    // Ảnh chi tiết 12/11: ưu tiên file khách hỏi (vd eb8013-5 = đáy khắc);
+    // file không có thì tự rơi về ảnh đầu như cũ — không vỡ khi thiếu ảnh.
+    for (const marker of preferredFiles) {
+      if (picked.length >= maxPerProduct) break;
+      const hit = all.find((u) => u.includes(marker) && !picked.includes(u));
+      if (hit) picked.push(hit);
+    }
+    for (const u of all) {
+      if (picked.length >= maxPerProduct) break;
+      if (!picked.includes(u)) picked.push(u);
+    }
+    urls.push(...picked);
   }
 
   return normalizeUrls(urls);
