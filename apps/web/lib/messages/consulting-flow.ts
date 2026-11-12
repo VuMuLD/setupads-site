@@ -109,7 +109,7 @@ export function getConsultingPlan(stage: ConsultingStage): string {
       "1. Khách đã có ý định → hướng dẫn đặt hàng đơn giản",
       "2. Hỏi size/màu/số lượng nếu chưa rõ",
       "3. Nhắc ship COD / giao nhanh / freeship nếu có",
-      "4. Xin SĐT + địa chỉ một cách tự nhiên",
+      "4. Xin thông tin chốt đơn đúng câu mẫu, nguyên văn: '👉 Anh/Chị cho em xin Tên + SĐT + Địa chỉ, em lên đơn cho mình ạ'",
     ].join("\n"),
     follow_up: [
       "1. Nhắc nhẹ nếu khách im lặng sau khi tư vấn",
@@ -155,7 +155,7 @@ export function getStageGuidance(stage: ConsultingStage): string {
     objection:
       "Khách đang do dự hoặc phàn nàn. Đồng cảm trước, giải thích ngắn, dùng social proof (ảnh khách mua).",
     closing:
-      "Khách sắp mua. Hướng dẫn đặt hàng rõ ràng, hỏi thông tin giao hàng. Đừng hỏi lan man.",
+      "Khách sắp mua. Hướng dẫn đặt hàng rõ ràng. Còn thiếu thông tin thì hỏi đúng CÂU CHỐT nguyên văn: '👉 Anh/Chị cho em xin Tên + SĐT + Địa chỉ, em lên đơn cho mình ạ'. Đừng hỏi lan man.",
     follow_up:
       "Khách chưa trả lời sau tư vấn. Nhắc nhẹ, không ép. Hỏi còn thắc mắc gì không.",
     follow_up_value:
