@@ -42,22 +42,34 @@ function formatVnDate(d: Date): string {
 
 export async function generateOrderCode(pageId: string): Promise<string> {
   const now = new Date();
-  // Đếm theo TIỀN TỐ MÃ (DH-<ngày>-): MỌI đơn đã mang mã của ngày đó trong
-  // Page, kể cả đơn received chưa xác nhận. Cách cũ đếm theo confirmedAt
-  // trong cửa sổ ngày-local, còn mã lại lấy ngày UTC (toISOString) — đơn tạo
-  // 7/11 01:02 VN mang mã 20261106 nhưng rơi ngoài cửa sổ đếm ngày 7/11 nên
-  // cùng ra 001 với đơn 6/11 (sự cố trùng mã DH-20261106-001 ở Bếp Việt).
-  // Đếm theo tiền tố thì ngày đếm và ngày trong mã là một, không lệch múi giờ.
+  // Đếm theo TIỀN TỐ MÃ: MỌI đơn đã mang mã của ngày đó trong Page, kể cả
+  // đơn received chưa xác nhận. Cách cũ đếm theo confirmedAt trong cửa sổ
+  // ngày-local, còn mã lại lấy ngày UTC (toISOString) — đơn tạo 7/11 01:02 VN
+  // mang mã 20261106 nhưng rơi ngoài cửa sổ đếm ngày 7/11 nên cùng ra 001
+  // với đơn 6/11 (sự cố trùng mã DH-20261106-001 ở Bếp Việt). Đếm theo tiền
+  // tố thì ngày đếm và ngày trong mã là một, không lệch múi giờ.
+  // Vá 14/11 (bro chọn phương án B): mã mang TIỀN TỐ PAGE — mỗi Page chạy
+  // dãy 001 riêng nhưng sổ đối chiếu mã toàn cục nên mã trùng nhau giữa các
+  // Page (DH-20261111-001, DH-20261114-001). Tiền tố = chữ tắt tên Page
+  // (cùng abbreviatePageName dùng ở form xác nhận): BV / STGD / TGDGD.
+  // Đơn cũ giữ nguyên mã không tiền tố; chỉ đơn mới mang tiền tố.
   const dateStr = now.toISOString().slice(0, 10).replace(/-/g, "");
+  const page = await prisma.page.findUnique({
+    where: { id: pageId },
+    select: { name: true },
+  });
+  const abbr = page?.name ? abbreviatePageName(page.name) : "";
+  const codePrefix = abbr ? `${abbr}-DH-${dateStr}-` : `DH-${dateStr}-`;
   const count = await prisma.pageCustomerOrder.count({
-    where: { pageId, orderCode: { startsWith: `DH-${dateStr}-` } },
+    where: { pageId, orderCode: { startsWith: codePrefix } },
   });
   let seq = count + 1;
-  // Chốt chặn cuối: mã phải duy nhất trong Page — mã đã tồn tại thì tăng tiếp.
+  // Chốt chặn cuối: mã phải duy nhất TOÀN CỤC (không gắn pageId) — kể cả khi
+  // 2 Page trùng chữ tắt thì mã vẫn không trùng được.
   for (;;) {
-    const code = `DH-${dateStr}-${String(seq).padStart(3, "0")}`;
+    const code = `${codePrefix}${String(seq).padStart(3, "0")}`;
     const exists = await prisma.pageCustomerOrder.findFirst({
-      where: { pageId, orderCode: code },
+      where: { orderCode: code },
       select: { id: true },
     });
     if (!exists) return code;
