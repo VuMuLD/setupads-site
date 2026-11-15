@@ -165,6 +165,9 @@ function looksLikeAddressLine(line: string): boolean {
   if (REMARK_LINE.test(strippedLine)) return false;
   // "600k ..." ở đầu dòng là giá tiền, không phải số nhà
   if (/^\d{3}\s*k\b/.test(strippedLine)) return false;
+  // "1 bộ nhé shop" là câu chốt số lượng, không phải số nhà — chặn trước
+  // rule số nhà bên dưới (vá 15/11, test W).
+  if (/^\d+\s*(bộ|món|cái|sp)(\s|$|[.,!?])/i.test(line)) return false;
   if (ADDRESS_KEYWORDS.test(line)) return true;
   if (/^\d+[\s,/]/.test(line)) return true;
   const n = stripVnDiacritics(line).replace(/[.,]/g, " ");
@@ -318,6 +321,41 @@ export function extractAddressFromText(text: string): string | null {
   return out.trim() || null;
 }
 
+/** Câu chốt mua / đặt hàng thuần túy — KHÔNG phải địa chỉ: "Tôi 1 bộ 6
+ * món", "Cho mình 1 bộ", "Ok lấy 1 bộ", "Đặt hàng cho em nhé". Dùng để loại
+ * khỏi fallback câu thô bên dưới. */
+// KHÔNG dùng \b ở đây: \b của JS chỉ hiểu ký tự ASCII nên đứng cạnh
+// chữ có dấu thì hỏng (\b trước "đặt" không bao giờ khớp — test T từng
+// lọt "Đặt hàng cho em nhé"). Dùng neo đầu dòng / khoảng trắng thay thế.
+const PURCHASE_STATEMENT =
+  /((lấy|mua|đặt|chốt)\s+.*(bộ|món|cái|sp|sản phẩm)|^(tôi|mình|em|anh|chị|cho)\s+.*(bộ|món)|^\d+\s*(bộ|món|cái)|(đặt hàng|lên đơn|chốt đơn|gửi hàng|ship hàng))/i;
+
+/** Fallback địa chỉ (chủ shop chốt 15/11): đã có SĐT mà không trích được
+ * địa chỉ theo mẫu thì ghi NGUYÊN CÂU của khách để team đọc và hỏi lại,
+ * thay vì bỏ đơn. Chỉ lấy câu mới nhất còn giống "đang đưa thông tin"
+ * trong 3 tin nhắn gần nhất: đủ dài, không phải câu mặc cả/phàn nàn/
+ * nhận xét khoảng cách, không phải câu chốt mua, đã bỏ SĐT khỏi câu. */
+function extractRawAddressFallback(inbound: FlowMessage[]): string | null {
+  const recent = inbound.slice(-3).reverse();
+  for (const msg of recent) {
+    const lines = msg.text.split(/\n+/).map((l) => l.trim()).filter(Boolean);
+    for (const line of lines.reverse()) {
+      const clean = line
+        .replace(PHONE_STRIP_GLOBAL, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+      if (clean.length < 12 || clean.length > 220) continue;
+      const stripped = stripVnDiacritics(clean).toLowerCase();
+      if (HAGGLE_LINE.test(stripped)) continue;
+      if (COMPLAINT_LINE.test(stripped)) continue;
+      if (REMARK_LINE.test(stripped)) continue;
+      if (PURCHASE_STATEMENT.test(clean)) continue;
+      return clean;
+    }
+  }
+  return null;
+}
+
 export function extractCustomerInfoFromMessages(
   messages: FlowMessage[],
   productNames?: string[]
@@ -326,7 +364,9 @@ export function extractCustomerInfoFromMessages(
   const allInbound = inbound.map((m) => m.text).join("\n");
 
   const phone = extractPhoneFromText(allInbound);
-  const address = extractAddressFromInbound(allInbound);
+  const address =
+    extractAddressFromInbound(allInbound) ??
+    (phone ? extractRawAddressFallback(inbound) : null);
   const sizeMatch = allInbound.match(SIZE_EXTRACT);
 
   const preferences: CustomerPreferences = {};
