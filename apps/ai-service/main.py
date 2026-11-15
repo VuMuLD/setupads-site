@@ -1,5 +1,6 @@
 import os
 import json
+import re
 from typing import Optional
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -180,9 +181,14 @@ async def message_advice(request: MessageAdviceRequest):
     head = raw.lstrip()[:80]
     if head.startswith("Lỗi ") or "chưa được cấu hình" in head or "API key" in head:
         raise HTTPException(status_code=502, detail=f"AI provider error: {raw[:200]}")
-    parsed = parse_message_advice(raw)
+    # Parse lỗi thì 502 (web bỏ lượt trả lời này, thử lại lượt sync sau)
+    # thay vì gửi JSON thô cho khách (sự cố 15/11, Minh Pham BV).
+    try:
+        parsed = parse_message_advice(raw)
+    except ValueError:
+        raise HTTPException(status_code=502, detail="AI advice parse failed")
     return {
-        "reply": parsed.get("reply", raw[:500]),
+        "reply": parsed["reply"],
         "nextStage": parsed.get("nextStage", request.consultingStage),
         "recommendedProducts": parsed.get("recommendedProducts", []),
         "sendImages": parsed.get("sendImages", []),
@@ -296,6 +302,43 @@ def parse_old_customer_message(response: str) -> dict:
     return {"text": response.strip()[:1500], "name": "Tin nhắn khách cũ"}
 
 
+def _extract_reply_lenient(response: str) -> Optional[str]:
+    """Trích giá trị "reply" khi JSON lỗi — Gemini hay để xuống dòng THẬT
+    trong câu trả lời (luật 2 dòng) khiến json.loads thất bại. Trả None nếu
+    không trích được (endpoint sẽ 502 thay vì gửi JSON thô cho khách)."""
+    m = re.search(r'"reply"\s*:\s*"', response)
+    if not m:
+        return None
+    start = m.end()
+    end_m = re.search(
+        r'"\s*,\s*"(?:nextStage|recommendedProducts|sendImages|sendCustomerPhotos)"',
+        response[start:],
+    )
+    if end_m:
+        raw_value = response[start:start + end_m.start()]
+    else:
+        end_m2 = re.search(r'"\s*\}\s*$', response[start:])
+        if not end_m2:
+            return None
+        raw_value = response[start:start + end_m2.start()]
+    raw_value = raw_value.strip()
+    if not raw_value:
+        return None
+    try:
+        # Chỉ escape ký tự điều khiển (xuống dòng/tab) — giữ nguyên escape
+        # JSON sẵn có (\" \\ ...) rồi decode chuỗi.
+        escaped = (
+            raw_value.replace("\r\n", "\\n")
+            .replace("\n", "\\n")
+            .replace("\r", "\\n")
+            .replace("\t", "\\t")
+        )
+        return json.loads('"' + escaped + '"')
+    except json.JSONDecodeError:
+        # Có dấu " không escape trong câu trả lời — dùng nguyên văn.
+        return raw_value.replace('\\"', '"').replace("\\\\", "\\")
+
+
 def parse_message_advice(response: str) -> dict:
     start = response.find("{")
     end = response.rfind("}") + 1
@@ -306,7 +349,11 @@ def parse_message_advice(response: str) -> dict:
                 return data
         except json.JSONDecodeError:
             pass
-    return {"reply": response.strip()[:1000], "recommendedProducts": [], "sendImages": [], "sendCustomerPhotos": []}
+    repaired = _extract_reply_lenient(response)
+    if repaired:
+        return {"reply": repaired, "recommendedProducts": [], "sendImages": [], "sendCustomerPhotos": []}
+    # KHÔNG BAO GIỜ trả JSON thô làm câu trả lời (sự cố 15/11) — để endpoint 502.
+    raise ValueError("AI advice parse failed: no reply extracted")
 
 
 def parse_recommendations(response: str, campaigns: list) -> list:

@@ -58,10 +58,22 @@ export function formatMessengerSendError(err: unknown): string {
   return err instanceof Error ? err.message : "Gửi thất bại";
 }
 
+/** JSON thô của AI (vá 15/11): Gemini đôi khi trả JSON lỗi parse, ai-service
+ * từng gửi nguyên văn JSON làm câu trả lời (khách Minh Pham, BV 15/11).
+ * Tin này KHÔNG BAO GIỜ được gửi khách — chặn ở mọi đường gửi. */
+export function isRawJsonReply(text: string): boolean {
+  const t = text.trim();
+  return t.startsWith("{") && t.includes('"reply"');
+}
+
 export async function sendConversationReply(
   options: SendReplyOptions
 ): Promise<SendReplyResult> {
   let text = options.text.trim();
+  // Chốt chặn cuối (vá 15/11): JSON thô của AI không bao giờ được gửi khách.
+  if (text && isRawJsonReply(text)) {
+    throw new Error("Chặn tin JSON thô của AI — không gửi cho khách");
+  }
   // Luật của chủ Page (2026-11-03): mỗi lượt gửi tối đa 2 ảnh — không gửi nhiều hơn.
   const imageUrls = normalizeUrls(options.imageUrls || []).slice(0, 2);
 

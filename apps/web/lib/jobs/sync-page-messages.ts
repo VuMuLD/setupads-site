@@ -15,6 +15,7 @@ import { generateMessageAdvice } from "@/lib/ai/message-advisor";
 import { learnAfterAiReply } from "@/lib/ai/customer-learning";
 import { captureOrderFromConversation } from "@/lib/messages/orders";
 import {
+  isRawJsonReply,
   resolveCustomerPhotoUrls,
   resolveProductImageUrls,
   sendConversationReply,
@@ -241,6 +242,15 @@ async function autoReplyToInbound(
   });
 
   if (!advice.reply) return false;
+
+  // Chặn JSON thô (vá 15/11): đặt TRƯỚC khi đánh dấu đã trả lời để lượt sync
+  // sau thử lại với câu trả lời mới thay vì bỏ lơ khách.
+  if (isRawJsonReply(advice.reply)) {
+    console.error(
+      `[syncPageMessages] Chặn tin JSON thô cho tin ${message.id} (hội thoại ${conversationId})`
+    );
+    return false;
+  }
 
   await prisma.pageMessage.update({
     where: { id: message.id },

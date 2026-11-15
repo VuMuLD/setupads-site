@@ -8,8 +8,20 @@ import { buildConsultingContext } from "@/lib/messages/consulting-flow";
 const PHONE_EXTRACT =
   /(?:sdt|sđt|điện\s*thoại|phone|zalo)\s*:?\s*(0[35789]\d{8})|(?:^|\s)(0[35789]\d{8})(?:\s|$)/i;
 
+/** Bỏ SĐT khỏi văn bản trước khi xét địa chỉ (vá 15/11): khách hay gõ địa
+ * chỉ + SĐT cùng 1 dòng. Dùng \b thay cho khoảng trắng ở 2 đầu để không
+ * nuốt ký tự khi có 2 SĐT liền nhau. */
+const PHONE_STRIP_GLOBAL =
+  /(?:sdt|sđt|điện\s*thoại|phone|zalo)\s*:?\s*0[35789]\d{8}|\b0[35789]\d{8}\b/gi;
+
+/** Nhãn địa chỉ: "địa chỉ"/"giao đến|tới|về" (dấu : tùy chọn) và
+ * "Đc"/"Dc" — riêng "Đc" BẮT BUỘC có dấu : vì "đc" còn là viết tắt của
+ * "được" ("đc ko shop" không phải địa chỉ). Vùng bắt cho phép dấu chấm vì
+ * địa chỉ thật hay viết liền dấu chấm ("A.Phường Hoà Mạc.TDP Số 4...") —
+ * câu thừa sau địa chỉ được cắt ở extractAddressFromText. (Vá 15/11, đơn
+ * #BV-DH-20261115-009: "Đc : ... Ninh Bình" từng không khớp mẫu này.) */
 const ADDRESS_EXTRACT =
-  /(?:địa\s*chỉ|giao\s*(?:đến|tới|về))\s*:?\s*([^\n.]{10,200})/i;
+  /(?:(?:địa\s*chỉ|giao\s*(?:đến|tới|về))\s*:?|(?:đc|dc)\s*:)\s*([^\n]{10,200})/i;
 
 const SIZE_EXTRACT = /(?:size|sz)\s*:?\s*([a-z0-9]+)/i;
 const QTY_EXTRACT = /(?:lấy|mua|đặt|sl)\s*:?\s*(\d+)/i;
@@ -132,6 +144,13 @@ const HAGGLE_LINE =
 const COMPLAINT_LINE =
   /(khong giong|quang cao|quan cao|khong dung hang|sai hang|hang sai|hang loi|loi hang|bi vo|bi meo|hoi meo|bi mop|bi hong|bi gay|bi nut|bi cham|bi thieu|bi sai|lan truoc|hom truoc|don truoc|don cu|giao truoc|da giao|giao roi|doi tra|tra hang|tra lai|hoan hang|doi hang|phan nan|khieu nai|khong hai long)/;
 
+/** Câu NHẬN XÉT về khoảng cách/vị trí KHÔNG phải địa chỉ: "Quảng Nam xa quá
+ * shop à" từng bị rule "xa" (trùng "xã" sau khi bỏ dấu) + tên tỉnh bắt thành
+ * địa chỉ của đơn #BV-DH-20261115-009. Chặn các câu hỏi/bình luận về vị trí
+ * TRƯỚC mọi rule nhận diện địa chỉ. */
+const REMARK_LINE =
+  /(xa qua|xa vay|xa the|xa lam|xa nhi|gan qua|o dau|o cho nao|o tinh nao|o xa nao|o huyen nao|(xa|gan)\s*$)/;
+
 function isComplaintText(s: string): boolean {
   return COMPLAINT_LINE.test(stripVnDiacritics(s).toLowerCase());
 }
@@ -143,6 +162,7 @@ function looksLikeAddressLine(line: string): boolean {
   const strippedLine = stripVnDiacritics(line).toLowerCase();
   if (HAGGLE_LINE.test(strippedLine)) return false;
   if (COMPLAINT_LINE.test(strippedLine)) return false;
+  if (REMARK_LINE.test(strippedLine)) return false;
   // "600k ..." ở đầu dòng là giá tiền, không phải số nhà
   if (/^\d{3}\s*k\b/.test(strippedLine)) return false;
   if (ADDRESS_KEYWORDS.test(line)) return true;
@@ -173,18 +193,23 @@ function trimToAddressAnchor(line: string): string {
 }
 
 function extractAddressFromInbound(allInbound: string): string | null {
-  const labeled = extractAddressFromText(allInbound);
+  // Bỏ SĐT trước khi xét địa chỉ (vá 15/11, đơn #BV-DH-20261115-009):
+  // khách hay gõ địa chỉ + SĐT cùng 1 dòng ("Đc: ... Ninh Bình sđt: 0343...").
+  // Cách cũ bỏ cả dòng khi tổng số chữ số <= 11 nên mất luôn địa chỉ thật,
+  // rồi nhặt nhầm câu nhận xét cũ hơn ("Quảng Nam xa quá shop à") làm địa chỉ.
+  const noPhone = allInbound.replace(PHONE_STRIP_GLOBAL, " ");
+
+  const labeled = extractAddressFromText(noPhone);
   if (labeled && !isComplaintText(labeled)) return labeled;
 
-  const shipMatch = allInbound.match(
+  const shipMatch = noPhone.match(
     /(?:ship|giao|nhận)\s*(?:về|đến|tại|ở)\s*:?\s*([^\n.!?]{10,220})/i
   );
   if (shipMatch?.[1] && !isComplaintText(shipMatch[1])) return shipMatch[1].trim();
 
-  const lines = allInbound.split(/\n+/).map((l) => l.trim()).filter(Boolean);
+  const lines = noPhone.split(/\n+/).map((l) => l.trim()).filter(Boolean);
   for (const line of lines.reverse()) {
     if (line.length < 12 || line.length > 220) continue;
-    if (PHONE_EXTRACT.test(line) && line.replace(/\D/g, "").length <= 11) continue;
     if (looksLikeAddressLine(line)) {
       return trimToAddressAnchor(
         line.replace(/^(địa\s*chỉ|dc|addr)\s*:?\s*/i, "").trim()
@@ -271,7 +296,26 @@ export function extractPhoneFromText(text: string): string | null {
 
 export function extractAddressFromText(text: string): string | null {
   const m = text.match(ADDRESS_EXTRACT);
-  return m?.[1]?.trim() || null;
+  const raw = m?.[1]?.trim();
+  if (!raw) return null;
+  // Địa chỉ hay viết liền dấu chấm ("A.Phường...") nên vùng bắt cho phép
+  // chấm — nhưng câu thừa sau địa chỉ thì cắt: chỉ giữ các đoạn sau dấu
+  // ". " khi đoạn đó còn từ khóa địa chỉ ("123 đường X. Tôi muốn mua"
+  // → chỉ giữ "123 đường X").
+  const parts = raw.split(/\. /);
+  let out = parts[0];
+  for (let i = 1; i < parts.length; i++) {
+    if (
+      /(đường|phố|ngõ|hẻm|thôn|ấp|xóm|phường|xã|quận|huyện|tỉnh|thành phố|\btdp\b|số\s*\d+)/i.test(
+        parts[i]
+      )
+    ) {
+      out += ". " + parts[i];
+    } else {
+      break;
+    }
+  }
+  return out.trim() || null;
 }
 
 export function extractCustomerInfoFromMessages(
