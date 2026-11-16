@@ -5,25 +5,25 @@ import { isFacebookAppRateLimited } from "@/lib/facebook/rate-limit";
 
 /**
  * Nhắc chốt đơn 3 khung/ngày (chủ shop chốt 16/11): 9h, 16h, 21h giờ Sài
- * Gòn, gửi đúng câu chốt nguyên văn cho khách nhắn trong ngày mà chưa lên
- * đơn. Mỗi khách tối đa 2 lần câu này mỗi ngày — đếm trên tin OUTBOUND thực
- * tế trong ngày, gồm cả câu bot gửi lúc chat trực tiếp và câu của hệ thống
- * canned: đủ 2 lần thì thôi, dưới 2 lần thì gửi lại.
+ * Gòn, gửi đúng câu chốt nguyên văn cho khách chưa lên đơn. Mỗi khách tối
+ * đa 2 lần câu này mỗi ngày — đếm trên tin OUTBOUND thực tế trong ngày,
+ * gồm cả câu bot gửi lúc chat trực tiếp và câu của hệ thống canned: đủ 2
+ * lần thì thôi, dưới 2 lần thì gửi lại.
  *
- * Điều kiện an toàn (mượn từ daily-repitch.ts):
- * - Chỉ khách nhắn trong ngày (giờ Sài Gòn), chưa có đơn chưa huỷ, bot đang
- *   phụ trách (tin khách gần nhất do AI trả lời, tin cuối là của bot), khách
- *   đã im lặng >= 1h, trong cửa sổ 24h của Facebook.
- * - Đã có tin chăm sóc trong 3h gần nhất -> bỏ qua, tránh dồn dập.
- * - Đã nhận bước 4 (tin cuối của chuỗi chăm sóc) -> bỏ qua.
- * - Khách từ chối rõ / opt-out -> bỏ qua.
- * - Tin cuối vừa là câu chốt -> bỏ qua lượt này (tránh gửi trùng liền).
+ * Luật chọn khách (nới 16/11, user: "chỉ bỏ qua người đã mua còn lại gửi
+ * hết"): gửi hết mọi hội thoại có tin khách trong cửa sổ 24h, KHÔNG phân
+ * biệt bot hay nhân viên đang cầm, không yêu cầu nhắn trong ngày hay im
+ * lặng. Chỉ bỏ qua:
+ * - Đã có đơn chưa huỷ đủ SĐT + địa chỉ (người đã mua).
+ * - Ngoài cửa sổ 24h của Facebook (giới hạn kỹ thuật: API từ chối gửi).
+ * - Khách từ chối rõ / opt-out (chống spam, bảo vệ Page).
+ * - Đã đủ 2 lần câu chốt trong ngày, hoặc tin shop cuối vừa là câu chốt.
  * Gửi xong ghi vào page_conversation_nudges với step=3 để chuỗi 4 bước hiểu
  * là lượt này đã nhận tin mời mua (bước tiếp theo nếu có chỉ còn bước cuối).
  */
 const HOUR_MS = 60 * 60 * 1000;
 const WINDOW_MS = 23 * HOUR_MS;
-const MAX_PER_PAGE = 30;
+const MAX_PER_PAGE = 100;
 const MAX_CLOSING_PER_DAY = 2;
 
 export const CLOSING_LINE =
@@ -120,16 +120,18 @@ async function collectPage(
   };
   const eligible: ClosingCandidate[] = [];
 
+  // Luật nới 16/11: quét mọi hội thoại có tin trong 24h qua, không phân
+  // biệt bot hay nhân viên đang cầm, không yêu cầu nhắn trong ngày hay
+  // im lặng — chỉ các bộ lọc ở dưới mới loại khách ra.
   const conversations = await prisma.pageConversation.findMany({
     where: {
       pageId: page.id,
       lastMessageAt: {
-        gte: dayStartUtc,
-        lte: new Date(now.getTime() - 1 * HOUR_MS),
+        gte: new Date(now.getTime() - WINDOW_MS),
       },
     },
     orderBy: { lastMessageAt: "desc" },
-    take: 120,
+    take: 200,
   });
 
   for (const conv of conversations) {
@@ -142,69 +144,15 @@ async function collectPage(
       bump("no_messages");
       continue;
     }
-    const last = messages[0];
-    if (last.direction !== "OUTBOUND") {
-      bump("waiting_reply");
-      continue;
-    }
-    if (now.getTime() - last.sentAt.getTime() < 1 * HOUR_MS) {
-      bump("too_recent");
-      continue;
-    }
     const lastInbound = messages.find((m) => m.direction === "INBOUND");
     if (!lastInbound) {
       bump("no_inbound");
       continue;
     }
-    if (lastInbound.sentAt.getTime() < dayStartUtc.getTime()) {
-      bump("not_today");
-      continue;
-    }
+    // Cửa sổ 24h của Facebook: ngoài cửa sổ API từ chối gửi — giữ lại vì
+    // là giới hạn kỹ thuật, không phải luật chọn khách.
     if (now.getTime() - lastInbound.sentAt.getTime() > WINDOW_MS) {
       bump("outside_24h");
-      continue;
-    }
-    if (!lastInbound.aiSuggestedReply || !lastInbound.aiReplyAt) {
-      bump("staff_handled");
-      continue;
-    }
-
-    // Tin shop cuối phải do bot gửi (sát lúc AI trả lời hoặc sát tin chăm sóc trước)
-    const nudges = await prisma.$queryRawUnsafe<
-      Array<{ step: number; nudged_at: Date }>
-    >(
-      "SELECT step, nudged_at FROM page_conversation_nudges WHERE conversation_id = ? AND anchor_message_id = ? ORDER BY step ASC",
-      conv.id,
-      lastInbound.id
-    );
-    const deltaAi = last.sentAt.getTime() - lastInbound.aiReplyAt.getTime();
-    let botSent = deltaAi >= -15_000 && deltaAi <= 5 * 60 * 1000;
-    if (!botSent) {
-      for (const n of nudges) {
-        const d = last.sentAt.getTime() - new Date(n.nudged_at).getTime();
-        if (d >= -5 * 60 * 1000 && d <= 60_000) {
-          botSent = true;
-          break;
-        }
-      }
-    }
-    if (!botSent) {
-      bump("staff_last_outbound");
-      continue;
-    }
-
-    const stepsSent = nudges.map((n) => Number(n.step));
-    if (stepsSent.length && Math.max(...stepsSent) >= 4) {
-      bump("already_final");
-      continue;
-    }
-    if (
-      nudges.length &&
-      now.getTime() -
-        Math.max(...nudges.map((n) => new Date(n.nudged_at).getTime())) <
-        3 * HOUR_MS
-    ) {
-      bump("nudged_recently");
       continue;
     }
 
@@ -237,14 +185,16 @@ async function collectPage(
       continue;
     }
 
-    // Cap 2 lần câu chốt/ngày: đếm tin OUTBOUND chứa câu chốt trong ngày
+    // Cap 2 lần câu chốt/ngày (luật user chốt sáng 16/11 — giữ nguyên):
+    // đếm tin OUTBOUND chứa câu chốt trong ngày.
     const closingSentToday = await countClosingToday(conv.id, dayStartUtc);
     if (closingSentToday >= MAX_CLOSING_PER_DAY) {
       bump("closing_cap");
       continue;
     }
-    // Tin cuối vừa là câu chốt -> bỏ qua lượt này, để lượt sau
-    if ((last.text || "").includes(CLOSING_CORE)) {
+    // Tin shop cuối vừa là câu chốt -> bỏ qua lượt này, tránh gửi trùng liền.
+    const lastOutbound = messages.find((m) => m.direction === "OUTBOUND");
+    if (lastOutbound && (lastOutbound.text || "").includes(CLOSING_CORE)) {
       bump("just_sent");
       continue;
     }
@@ -254,7 +204,7 @@ async function collectPage(
       participantName: conv.participantName,
       lastInboundAt: lastInbound.sentAt.toISOString(),
       closingSentToday,
-      stepsSent,
+      stepsSent: [],
     });
   }
 
