@@ -78,12 +78,22 @@ export interface ClosingCandidate {
   stepsSent: number[];
 }
 
+// Khách đủ điều kiện lúc quét nhưng bị bỏ qua ngay trước khi gửi (kiểm tra
+// lại): ghi rõ lý do + tên để báo cáo nêu được, thay vì phải đoán như vụ
+// Long Phi tối 15/11 (đủ điều kiện, không nhận được tin, log không có lỗi).
+export interface ClosingSendSkip {
+  conversationId: string;
+  participantName: string | null;
+  reason: "no_inbound" | "just_sent" | "closing_cap";
+}
+
 export interface ClosingPageResult {
   pageId: string;
   pageName: string;
   eligible: ClosingCandidate[];
   sent: number;
   skipped: Record<string, number>;
+  sendSkipped: ClosingSendSkip[];
 }
 
 async function countClosingToday(
@@ -284,6 +294,13 @@ export async function runClosingReminder(options: {
       dayStartUtc
     );
     let sent = 0;
+    // Chỉ ghi log: 3 chỗ bỏ qua lặng trong vòng gửi (trước đây `continue`
+    // không ghi gì nên eligible > sent mà báo cáo không nêu được lý do).
+    // Không đổi luật gửi, không đổi điều kiện.
+    const sendSkipped: ClosingSendSkip[] = [];
+    const bumpSend = (k: string) => {
+      skipped[k] = (skipped[k] || 0) + 1;
+    };
     if (!options.dryRun) {
       for (const cand of eligible.slice(0, MAX_PER_PAGE)) {
         // Dừng gửi khi chạm cuối khung giờ của slot
@@ -296,13 +313,33 @@ export async function runClosingReminder(options: {
           });
           const lastInbound = messages.find((m) => m.direction === "INBOUND");
           const lastOutbound = messages.find((m) => m.direction === "OUTBOUND");
-          if (!lastInbound) continue;
+          if (!lastInbound) {
+            bumpSend("send_no_inbound");
+            sendSkipped.push({
+              conversationId: cand.conversationId,
+              participantName: cand.participantName,
+              reason: "no_inbound",
+            });
+            continue;
+          }
           // Kiểm tra lại cap + tin cuối ngay trước khi gửi (khách có thể
           // vừa nhận câu chốt từ bot trực tiếp sau lúc quét)
           if (lastOutbound && (lastOutbound.text || "").includes(CLOSING_CORE)) {
+            bumpSend("send_just_sent");
+            sendSkipped.push({
+              conversationId: cand.conversationId,
+              participantName: cand.participantName,
+              reason: "just_sent",
+            });
             continue;
           }
           if ((await countClosingToday(cand.conversationId, dayStartUtc)) >= MAX_CLOSING_PER_DAY) {
+            bumpSend("send_closing_cap");
+            sendSkipped.push({
+              conversationId: cand.conversationId,
+              participantName: cand.participantName,
+              reason: "closing_cap",
+            });
             continue;
           }
           await sendConversationReply({
@@ -333,6 +370,7 @@ export async function runClosingReminder(options: {
       eligible,
       sent,
       skipped,
+      sendSkipped,
     });
   }
   return { pages: results, dryRun: options.dryRun, slot };
