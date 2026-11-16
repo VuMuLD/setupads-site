@@ -188,9 +188,27 @@ function looksLikeAddressLine(line: string): boolean {
 const ADDRESS_ANCHOR =
   /(số\s*nhà|so\s*nha|số\s*\d+|so\s*\d+|địa\s*chỉ|dia\s*chi|đường|duong|phố|pho|ngõ|ngo|hẻm|hem|thôn|thon|ấp|ap|xóm|xom|tổ\s*\d+|to\s*\d+|khu\s*phố|khu\s*pho|phường|phuong|xã|xa|quận|quan|huyện|huyen|tỉnh|tinh|thành\s*phố|thanh\s*pho)/i;
 
+/** Từ khóa địa danh/cơ sở đứng TRƯỚC mốc địa chỉ — phần này LÀ địa chỉ,
+ * không phải câu chuyện trò: "quán sông quê chân cầu ..." (đơn
+ * #BV-DH-20261116-003 từng bị cắt mất vì trim chỉ giữ từ "phường"). Gặp
+ * từ khóa này thì giữ nguyên cả dòng. Kiểm tra trên văn bản đã bỏ dấu;
+ * "quan" ở đây là "quán"/"cơ quan" (quận đã là mốc nên không bao giờ nằm
+ * trước mốc), "cau" là "cầu". "cho" (chợ) loại trừ dạng "cho em/anh/chị"
+ * (động từ cho). */
+const LANDMARK_BEFORE_ANCHOR =
+  /\b(quan|cau|truong|shop|showroom|homestay|salon|spa|garage|karaoke|cong ty|benh vien|khach san|nha hang|cua hang|sieu thi|trung tam|chung cu|nha tho|ben xe|san bay|uy ban|cong an|buu dien|ky tuc xa|co quan|tru so|dai ly|cong vien|tram y te|phong kham|nha nghi|nga ba|nga tu|lo\s*[A-Za-z]?\d+|can\s*[A-Za-z]?\d+|cho(?!\s+(em|anh|chi|minh|toi|xin|hoi)))\b/;
+
 function trimToAddressAnchor(line: string): string {
   const m = line.match(ADDRESS_ANCHOR);
   if (m && m.index && m.index > 0) {
+    const before = line.slice(0, m.index);
+    // Giữ nguyên cả dòng khi phần trước mốc là địa danh/cơ sở (quán, cầu,
+    // trường, chợ...) hoặc chỉ là số nhà trần ("29 đường...", "Lô A29") —
+    // đó là thông tin giao hàng, không phải câu chuyện trò.
+    const strippedBefore = stripVnDiacritics(before).toLowerCase();
+    if (LANDMARK_BEFORE_ANCHOR.test(strippedBefore)) return line.trim();
+    if (/^\s*\d+[A-Za-z]?(?:\s*[\/,\-]\s*\d+[A-Za-z]?)?\s*$/.test(before))
+      return line.trim();
     return line
       .slice(m.index)
       .replace(/^số nhà (chị|anh|em|tôi|mình)\s+/i, "số nhà ")
@@ -227,7 +245,7 @@ function extractAddressFromInbound(allInbound: string): string | null {
     if (cut.length < 12 || cut.length > 220) continue;
     if (looksLikeAddressLine(cut)) {
       return trimToAddressAnchor(
-        cut.replace(/^(địa\s*chỉ|dia\s*chi|dc|addr)\s*:?\s*/i, "").trim()
+        cut.replace(/^(địa\s*chỉ|dia\s*chi|[đd]c|addr)\s*:?\s*/i, "").trim()
       );
     }
   }
@@ -355,6 +373,7 @@ function extractRawAddressFallback(inbound: FlowMessage[]): string | null {
         stripPhones(line)
           .replace(/\s+/g, " ")
           .replace(/^[.,;!]+/, "")
+          .replace(/^(địa\s*chỉ|dia\s*chi|[đd]c|addr)\s*:?\s*/i, "")
           .trim()
       );
       if (clean.length < 12 || clean.length > 220) continue;
