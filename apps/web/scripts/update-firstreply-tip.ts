@@ -15,7 +15,7 @@ async function main() {
     if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) v = v.slice(1, -1);
     if (!process.env[m[1]]) process.env[m[1]] = v;
   }
-  const { prisma } = await import("./lib/prisma");
+  const { prisma } = await import("../lib/prisma");
   const pages = await prisma.page.findMany({
     select: { id: true, name: true, aiConsultingInsights: true },
   });

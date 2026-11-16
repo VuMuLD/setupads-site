@@ -4,15 +4,17 @@ import {
   type FlowMessage,
 } from "@/lib/messages/purchase-detection";
 import { buildConsultingContext } from "@/lib/messages/consulting-flow";
+import {
+  stripVnDiacritics,
+  VN_PROVINCES,
+  extractPhone,
+  stripPhones,
+} from "@/lib/messages/vn-text";
 
-const PHONE_EXTRACT =
-  /(?:sdt|sđt|điện\s*thoại|phone|zalo)\s*:?\s*(0[35789]\d{8})|(?:^|\s)(0[35789]\d{8})(?:\s|$)/i;
-
-/** Bỏ SĐT khỏi văn bản trước khi xét địa chỉ (vá 15/11): khách hay gõ địa
- * chỉ + SĐT cùng 1 dòng. Dùng \b thay cho khoảng trắng ở 2 đầu để không
- * nuốt ký tự khi có 2 SĐT liền nhau. */
-const PHONE_STRIP_GLOBAL =
-  /(?:sdt|sđt|điện\s*thoại|phone|zalo)\s*:?\s*0[35789]\d{8}|\b0[35789]\d{8}\b/gi;
+/** SĐT: dùng extractPhone/stripPhones ở ./vn-text (vá 16/11) — bắt SĐT
+ * dính liền chữ, sau dấu chấm/phẩy, cách quãng (0848 176 189), có dấu chấm
+ * (0343.492.093), +84, nhãn đt/dt; \b của JS là ASCII nên không dùng gần
+ * chữ có dấu. */
 
 /** Nhãn địa chỉ: "địa chỉ"/"giao đến|tới|về" (dấu : tùy chọn) và
  * "Đc"/"Dc" — riêng "Đc" BẮT BUỘC có dấu : vì "đc" còn là viết tắt của
@@ -21,7 +23,7 @@ const PHONE_STRIP_GLOBAL =
  * câu thừa sau địa chỉ được cắt ở extractAddressFromText. (Vá 15/11, đơn
  * #BV-DH-20261115-009: "Đc : ... Ninh Bình" từng không khớp mẫu này.) */
 const ADDRESS_EXTRACT =
-  /(?:(?:địa\s*chỉ|giao\s*(?:đến|tới|về))\s*:?|(?:đc|dc)\s*:)\s*([^\n]{10,200})/i;
+  /(?:(?:địa\s*chỉ|dia\s*chi|giao\s*(?:đến|tới|về|den|toi|ve))\s*:?|(?:đc|dc)\s*:)\s*([^\n]{10,200})/i;
 
 const SIZE_EXTRACT = /(?:size|sz)\s*:?\s*([a-z0-9]+)/i;
 const QTY_EXTRACT = /(?:lấy|mua|đặt|sl)\s*:?\s*(\d+)/i;
@@ -104,28 +106,6 @@ export function buildOrderCollectionStatus(
   };
 }
 
-function stripVnDiacritics(s: string): string {
-  return s
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/đ/g, "d")
-    .replace(/Đ/g, "D")
-    .toLowerCase();
-}
-
-const VN_PROVINCES = [
-  "ha noi", "ho chi minh", "hai phong", "da nang", "can tho", "phu tho",
-  "hoa binh", "bac ninh", "bac giang", "vinh phuc", "hung yen", "hai duong",
-  "quang ninh", "thai nguyen", "lang son", "lao cai", "yen bai", "son la",
-  "dien bien", "lai chau", "ha giang", "cao bang", "bac kan", "tuyen quang",
-  "nam dinh", "thai binh", "ninh binh", "ha nam", "thanh hoa", "nghe an",
-  "ha tinh", "quang binh", "quang tri", "thua thien hue", "quang nam",
-  "quang ngai", "binh dinh", "phu yen", "khanh hoa", "ninh thuan",
-  "binh thuan", "kon tum", "gia lai", "dak lak", "dak nong", "lam dong",
-  "binh phuoc", "binh duong", "dong nai", "tay ninh", "ba ria vung tau",
-  "long an", "tien giang", "ben tre", "tra vinh", "vinh long", "dong thap",
-  "an giang", "kien giang", "hau giang", "soc trang", "bac lieu", "ca mau",
-];
 
 /** Câu mặc cả giá KHÔNG phải địa chỉ giao hàng: "600 có được thì mua" từng bị
  * rule số nhà (dòng bắt đầu bằng số) bắt thành địa chỉ → sinh đơn ảo
@@ -141,8 +121,26 @@ const HAGGLE_LINE =
  * về hàng đã giao / lỗi hàng / đổi trả TRƯỚC mọi rule nhận diện địa chỉ
  * bên dưới: gặp câu phàn nàn thì coi như CHƯA có địa chỉ, bot hỏi lại,
  * tuyệt đối không đoán. */
-const COMPLAINT_LINE =
-  /(khong giong|quang cao|quan cao|khong dung hang|sai hang|hang sai|hang loi|loi hang|bi vo|bi meo|hoi meo|bi mop|bi hong|bi gay|bi nut|bi cham|bi thieu|bi sai|lan truoc|hom truoc|don truoc|don cu|giao truoc|da giao|giao roi|doi tra|tra hang|tra lai|hoan hang|doi hang|phan nan|khieu nai|khong hai long)/;
+const COMPLAINT_LINE_HARD =
+  /(khong dung hang|sai hang|hang sai|hang loi|loi hang|bi vo|bi meo|hoi meo|bi mop|bi hong|bi gay|bi nut|bi cham|bi thieu|bi sai|lan truoc|hom truoc|don truoc|don cu|giao truoc|da giao|giao roi|sao giao|doi tra|tra hang|tra lai|hoan hang|doi hang|phan nan|khieu nai|khong hai long)/;
+
+/** Câu NGHI VẤN về sản phẩm (mềm): "hàng có như quảng cáo không" là câu hỏi
+ * trước khi mua, KHÔNG phải phàn nàn về đơn đã giao — dòng có địa chỉ thật
+ * + câu nghi vấn thì CẮT ở câu nghi vấn và giữ phần địa chỉ (ca Bế Lợi,
+ * 16/11). Chỉ chặn hẳn khi có dấu hiệu đơn cũ/lỗi hàng (HARD trên). */
+const SOFT_COMPLAINT_CUT =
+  /(không giống|khong giong|quảng cáo|quang cao|quán cáo|quan cao|hàng có như|hang co nhu)/i;
+
+function cutAtSoftComplaint(text: string): string {
+  const m = text.match(SOFT_COMPLAINT_CUT);
+  if (m && m.index !== undefined) return text.slice(0, m.index).trim();
+  return text;
+}
+
+/** Tin hệ thống của Facebook — không phải thông tin khách đưa: "Bạn có thể
+ * gọi cho ... trong 7 ngày tới" từng bị fallback ghi làm địa chỉ. */
+const SYSTEM_LINE =
+  /(ban co the goi cho|trong 7 ngay toi|cuoc goi|da goi|tep dinh kem|dinh kem|da gui mot)/;
 
 /** Câu NHẬN XÉT về khoảng cách/vị trí KHÔNG phải địa chỉ: "Quảng Nam xa quá
  * shop à" từng bị rule "xa" (trùng "xã" sau khi bỏ dấu) + tên tỉnh bắt thành
@@ -152,7 +150,7 @@ const REMARK_LINE =
   /(xa qua|xa vay|xa the|xa lam|xa nhi|gan qua|o dau|o cho nao|o tinh nao|o xa nao|o huyen nao|(xa|gan)\s*$)/;
 
 function isComplaintText(s: string): boolean {
-  return COMPLAINT_LINE.test(stripVnDiacritics(s).toLowerCase());
+  return COMPLAINT_LINE_HARD.test(stripVnDiacritics(s).toLowerCase());
 }
 
 /** Nhận diện 1 dòng tin nhắn có phải địa chỉ giao hàng không — kể cả khi
@@ -161,8 +159,9 @@ function isComplaintText(s: string): boolean {
 function looksLikeAddressLine(line: string): boolean {
   const strippedLine = stripVnDiacritics(line).toLowerCase();
   if (HAGGLE_LINE.test(strippedLine)) return false;
-  if (COMPLAINT_LINE.test(strippedLine)) return false;
+  if (COMPLAINT_LINE_HARD.test(strippedLine)) return false;
   if (REMARK_LINE.test(strippedLine)) return false;
+  if (SYSTEM_LINE.test(strippedLine)) return false;
   // "600k ..." ở đầu dòng là giá tiền, không phải số nhà
   if (/^\d{3}\s*k\b/.test(strippedLine)) return false;
   // "1 bộ nhé shop" là câu chốt số lượng, không phải số nhà — chặn trước
@@ -171,8 +170,13 @@ function looksLikeAddressLine(line: string): boolean {
   if (ADDRESS_KEYWORDS.test(line)) return true;
   if (/^\d+[\s,/]/.test(line)) return true;
   const n = stripVnDiacritics(line).replace(/[.,]/g, " ");
-  if (/^(khu|thon|ap|xom|to|so|ngo|hem|duong|pho|ban)\b/.test(n)) return true;
-  if (/\b(xa|phuong|huyen|quan|thi xa|thi tran|tinh|thanh pho)\b/.test(n)) return true;
+  // "ban" (bản) bỏ khỏi danh sách: "Bạn có thể..." (tin hệ thống FB) bỏ dấu
+  // thành "ban co the..." nên bị bắt nhầm. "to"/"so" phải kèm số hoặc "nha"
+  // ("tổ 2", "số 29", "số nhà") để không bắt "So sánh..." hay "To...".
+  if (/^(khu|thon|ap|xom|ngo|hem|duong|pho)\b/.test(n)) return true;
+  if (/^to\s+\d+/.test(n)) return true;
+  if (/^so(\s+\d+|\s+nha)\b/.test(n)) return true;
+  if (/\b(xa|phuong|huyen|quan|thi xa|thi tran|tinh|thanh pho|duong|pho|ngo|hem)\b/.test(n)) return true;
   const padded = ` ${n.replace(/\s+/g, " ")} `;
   return VN_PROVINCES.some((p) => padded.includes(` ${p} `));
 }
@@ -182,7 +186,7 @@ function looksLikeAddressLine(line: string): boolean {
  * mốc địa chỉ đầu tiên (số nhà/đường/phường...) trở đi, bỏ luôn đại
  * từ sở hữu sau "số nhà" (ca Kim Ngọc, đơn #DH-20261110-005). */
 const ADDRESS_ANCHOR =
-  /(số\s*nhà|số\s*\d+|địa\s*chỉ|đường|phố|ngõ|hẻm|thôn|ấp|xóm|tổ\s*\d+|khu\s*phố|phường|xã|quận|huyện|tỉnh|thành\s*phố)/i;
+  /(số\s*nhà|so\s*nha|số\s*\d+|so\s*\d+|địa\s*chỉ|dia\s*chi|đường|duong|phố|pho|ngõ|ngo|hẻm|hem|thôn|thon|ấp|ap|xóm|xom|tổ\s*\d+|to\s*\d+|khu\s*phố|khu\s*pho|phường|phuong|xã|xa|quận|quan|huyện|huyen|tỉnh|tinh|thành\s*phố|thanh\s*pho)/i;
 
 function trimToAddressAnchor(line: string): string {
   const m = line.match(ADDRESS_ANCHOR);
@@ -190,6 +194,7 @@ function trimToAddressAnchor(line: string): string {
     return line
       .slice(m.index)
       .replace(/^số nhà (chị|anh|em|tôi|mình)\s+/i, "số nhà ")
+      .replace(/^so nha (chi|anh|em|toi|minh)\s+/i, "so nha ")
       .trim();
   }
   return line;
@@ -200,22 +205,29 @@ function extractAddressFromInbound(allInbound: string): string | null {
   // khách hay gõ địa chỉ + SĐT cùng 1 dòng ("Đc: ... Ninh Bình sđt: 0343...").
   // Cách cũ bỏ cả dòng khi tổng số chữ số <= 11 nên mất luôn địa chỉ thật,
   // rồi nhặt nhầm câu nhận xét cũ hơn ("Quảng Nam xa quá shop à") làm địa chỉ.
-  const noPhone = allInbound.replace(PHONE_STRIP_GLOBAL, " ");
+  const noPhone = stripPhones(allInbound);
 
   const labeled = extractAddressFromText(noPhone);
-  if (labeled && !isComplaintText(labeled)) return labeled;
+  if (labeled && !isComplaintText(labeled)) {
+    const cut = cutAtSoftComplaint(labeled);
+    if (cut) return cut;
+  }
 
   const shipMatch = noPhone.match(
-    /(?:ship|giao|nhận)\s*(?:về|đến|tại|ở)\s*:?\s*([^\n.!?]{10,220})/i
+    /(?:ship|giao|nhận|nhan)\s*(?:về|ve|đến|den|tại|tai|ở|o|cho)\s*:?\s*([^\n.!?]{10,220})/i
   );
-  if (shipMatch?.[1] && !isComplaintText(shipMatch[1])) return shipMatch[1].trim();
+  if (shipMatch?.[1] && !isComplaintText(shipMatch[1])) {
+    const cut = cutAtSoftComplaint(shipMatch[1].trim());
+    if (cut) return cut;
+  }
 
   const lines = noPhone.split(/\n+/).map((l) => l.trim()).filter(Boolean);
   for (const line of lines.reverse()) {
-    if (line.length < 12 || line.length > 220) continue;
-    if (looksLikeAddressLine(line)) {
+    const cut = cutAtSoftComplaint(line);
+    if (cut.length < 12 || cut.length > 220) continue;
+    if (looksLikeAddressLine(cut)) {
       return trimToAddressAnchor(
-        line.replace(/^(địa\s*chỉ|dc|addr)\s*:?\s*/i, "").trim()
+        cut.replace(/^(địa\s*chỉ|dia\s*chi|dc|addr)\s*:?\s*/i, "").trim()
       );
     }
   }
@@ -293,8 +305,7 @@ export interface CustomerAiContext {
 }
 
 export function extractPhoneFromText(text: string): string | null {
-  const m = text.match(PHONE_EXTRACT);
-  return m?.[1] || m?.[2] || null;
+  return extractPhone(text);
 }
 
 export function extractAddressFromText(text: string): string | null {
@@ -309,7 +320,7 @@ export function extractAddressFromText(text: string): string | null {
   let out = parts[0];
   for (let i = 1; i < parts.length; i++) {
     if (
-      /(đường|phố|ngõ|hẻm|thôn|ấp|xóm|phường|xã|quận|huyện|tỉnh|thành phố|\btdp\b|số\s*\d+)/i.test(
+      /(đường|duong|phố|pho|ngõ|ngo|hẻm|hem|thôn|thon|ấp|ap|xóm|xom|phường|phuong|xã|xa|quận|quan|huyện|huyen|tỉnh|tinh|thành phố|thanh pho|\btdp\b|số\s*\d+|so\s*\d+)/i.test(
         parts[i]
       )
     ) {
@@ -328,7 +339,7 @@ export function extractAddressFromText(text: string): string | null {
 // chữ có dấu thì hỏng (\b trước "đặt" không bao giờ khớp — test T từng
 // lọt "Đặt hàng cho em nhé"). Dùng neo đầu dòng / khoảng trắng thay thế.
 const PURCHASE_STATEMENT =
-  /((lấy|mua|đặt|chốt)\s+.*(bộ|món|cái|sp|sản phẩm)|^(tôi|mình|em|anh|chị|cho)\s+.*(bộ|món)|^\d+\s*(bộ|món|cái)|(đặt hàng|lên đơn|chốt đơn|gửi hàng|ship hàng))/i;
+  /((lấy|mua|đặt|chốt)\s+.*(bộ|món|cái|sp|sản phẩm)|^[.,\s]*(tôi|mình|em|anh|chị|cho)\s+.*(bộ|món)|^[.,\s]*\d+\s*(bộ|món|cái)|(đặt hàng|lên đơn|chốt đơn|gửi hàng|ship hàng))/i;
 
 /** Fallback địa chỉ (chủ shop chốt 15/11): đã có SĐT mà không trích được
  * địa chỉ theo mẫu thì ghi NGUYÊN CÂU của khách để team đọc và hỏi lại,
@@ -340,14 +351,17 @@ function extractRawAddressFallback(inbound: FlowMessage[]): string | null {
   for (const msg of recent) {
     const lines = msg.text.split(/\n+/).map((l) => l.trim()).filter(Boolean);
     for (const line of lines.reverse()) {
-      const clean = line
-        .replace(PHONE_STRIP_GLOBAL, " ")
-        .replace(/\s+/g, " ")
-        .trim();
+      const clean = cutAtSoftComplaint(
+        stripPhones(line)
+          .replace(/\s+/g, " ")
+          .replace(/^[.,;!]+/, "")
+          .trim()
+      );
       if (clean.length < 12 || clean.length > 220) continue;
       const stripped = stripVnDiacritics(clean).toLowerCase();
       if (HAGGLE_LINE.test(stripped)) continue;
-      if (COMPLAINT_LINE.test(stripped)) continue;
+      if (COMPLAINT_LINE_HARD.test(stripped)) continue;
+      if (SYSTEM_LINE.test(stripped)) continue;
       if (REMARK_LINE.test(stripped)) continue;
       if (PURCHASE_STATEMENT.test(clean)) continue;
       return clean;

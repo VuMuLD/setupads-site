@@ -1,23 +1,32 @@
+import { stripVnDiacritics, VN_PROVINCES, extractPhone } from "./vn-text";
+
 export interface FlowMessage {
   direction: "INBOUND" | "OUTBOUND";
   text: string;
   sentAt?: string | Date;
 }
 
-const PHONE_PATTERN =
-  /(?:sdt|sđt|điện\s*thoại|phone|tel|zalo|zl)\s*:?\s*0[35789]\d{8}|(?:^|\s)0[35789]\d{8}(?:\s|$)/i;
+/** Từ khóa địa chỉ trên văn bản đã bỏ dấu (khách hay gõ không dấu).
+ * \b dùng được vì văn bản bỏ dấu chỉ còn ký tự ASCII. Không gồm "xa" trần
+ * (trùng "xa quá") — địa chỉ có "xã" thường kèm từ khóa khác hoặc tên tỉnh. */
+const ADDRESS_KEYWORDS_ND =
+  /(dia\s*chi|giao\s*(den|toi|ve|cho)|nhan\s*(tai|o|hang)|\b(phuong|quan|huyen|thi\s*xa|tinh|thon|ap|xom|khu|duong|pho|ngo|hem)\b|tp\.?\s*\w|so\s*\d+.*(duong|pho|ngo|ap|thon|xa))/;
 
-const ADDRESS_PATTERN =
-  /địa\s*chỉ|giao\s*(?:đến|tới|về|cho)|nhận\s*(?:tại|ở|hàng)|phường|quận|huyện|thị\s*xã|tỉnh|tp\.?\s*[a-zà-ỹ]|số\s*\d+.*(?:đường|phố|ngõ|ấp|thôn|xã)/i;
+function hasAddressSignal(text: string): boolean {
+  const n = stripVnDiacritics(text).toLowerCase();
+  if (ADDRESS_KEYWORDS_ND.test(n)) return true;
+  const padded = ` ${n.replace(/[.,]/g, " ").replace(/\s+/g, " ")} `;
+  return VN_PROVINCES.some((p) => padded.includes(` ${p} `));
+}
 
 const ORDER_COMMIT_PATTERN =
-  /(?:chốt|đặt|lấy|mua|order)\s*(?:luôn|ngay|giúp|hộ|cho|em|nha|ạ)?|(?:cho|lấy|mua)\s*(?:em|shop)?\s*\d+|(?:size|sz)\s*[a-z0-9]+.*(?:lấy|mua|đặt|chốt)/i;
+  /(?:chốt|chot|đặt|dat|lấy|lay|mua|order)\s*(?:luôn|luon|ngay|giúp|giup|hộ|ho|cho|em|nha|ạ|a)?|(?:cho|lấy|lay|mua)\s*(?:em|shop)?\s*\d+|(?:size|sz)\s*[a-z0-9]+.*(?:lấy|lay|mua|đặt|dat|chốt|chot)/i;
 
 const PAYMENT_CONFIRM_PATTERN =
-  /(?:đã|em|anh|chị)\s*(?:chuyển|ck|chuyển\s*khoản|thanh\s*toán)|chuyển\s*khoản\s*(?:xong|rồi|ok|thành\s*công)|đã\s*thanh\s*toán|cod\s*(?:ok|được)/i;
+  /(?:đã|da|em|anh|chị|chi)\s*(?:chuyển|chuyen|ck|chuyển\s*khoản|chuyen\s*khoan|thanh\s*toán|thanh\s*toan)|(?:chuyển\s*khoản|chuyen\s*khoan)\s*(?:xong|rồi|roi|ok|thành\s*công|thanh\s*cong)|đã\s*thanh\s*toán|da\s*thanh\s*toan|cod\s*(?:ok|được|duoc)/i;
 
 const EXPLICIT_PURCHASE_PATTERN =
-  /đã\s*mua|đặt\s*hàng\s*(?:rồi|xong|ok|thành\s*công)|chốt\s*đơn|mua\s*rồi|lấy\s*rồi/i;
+  /đã\s*mua|da\s*mua|(?:đặt\s*hàng|dat\s*hang)\s*(?:rồi|roi|xong|ok|thành\s*công|thanh\s*cong)|chốt\s*đơn|chot\s*don|mua\s*rồi|mua\s*roi|lấy\s*rồi|lay\s*roi/i;
 
 /** Chỉ tin nhắn khách gửi — không tính tin Page/AI */
 export function getInboundMessages(messages: FlowMessage[]): FlowMessage[] {
@@ -34,8 +43,8 @@ export function detectCustomerPurchaseCommitment(messages: FlowMessage[]): boole
   if (inbound.length === 0) return false;
 
   const inboundText = inbound.map((m) => m.text).join("\n");
-  const hasPhone = PHONE_PATTERN.test(inboundText);
-  const hasAddress = ADDRESS_PATTERN.test(inboundText);
+  const hasPhone = extractPhone(inboundText) !== null;
+  const hasAddress = hasAddressSignal(inboundText);
   const hasOrderCommit = ORDER_COMMIT_PATTERN.test(inboundText);
   const hasPaymentConfirm = PAYMENT_CONFIRM_PATTERN.test(inboundText);
 

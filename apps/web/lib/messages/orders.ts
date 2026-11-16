@@ -341,7 +341,9 @@ export async function captureOrderFromConversation(
     },
     include: {
       page: { select: { id: true, name: true } },
-      messages: { orderBy: { sentAt: "asc" }, take: 50 },
+      // Lấy 50 tin MỚI NHẤT (desc) rồi đảo lại: asc + take 50 chỉ lấy 50
+      // tin ĐẦU TIÊN nên hội thoại dài bị mất SĐT/địa chỉ gửi sau (vá 16/11).
+      messages: { orderBy: { sentAt: "desc" }, take: 50 },
     },
   });
 
@@ -349,13 +351,15 @@ export async function captureOrderFromConversation(
     return { captured: false };
   }
 
+  const orderedMessages = [...conversation.messages].reverse();
+
   const pageProducts = await prisma.pageProduct.findMany({
     where: { pageId: conversation.pageId, isActive: true },
     orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
     select: { id: true, name: true, price: true, description: true },
   });
 
-  const flowMessages = conversation.messages.map((m) => ({
+  const flowMessages = orderedMessages.map((m) => ({
     direction: m.direction as "INBOUND" | "OUTBOUND",
     text: m.text,
     sentAt: m.sentAt,
@@ -436,7 +440,7 @@ export async function captureOrderFromConversation(
     await linkConversationToCustomer(conversation.id, customer.id);
   }
 
-  const lastInbound = conversation.messages.filter((m) => m.direction === "INBOUND").pop();
+  const lastInbound = orderedMessages.filter((m) => m.direction === "INBOUND").pop();
 
   const { order, isNew } = await recordPageOrder(
     conversation.pageId,
