@@ -110,9 +110,11 @@ export function buildOrderCollectionStatus(
 /** Câu mặc cả giá KHÔNG phải địa chỉ giao hàng: "600 có được thì mua" từng bị
  * rule số nhà (dòng bắt đầu bằng số) bắt thành địa chỉ → sinh đơn ảo
  * #DH-20261105-002 cho khách chưa hề đồng ý giá. Chặn các dòng mặc cả TRƯỚC
- * mọi rule nhận diện địa chỉ bên dưới. */
+ * mọi rule nhận diện địa chỉ bên dưới. Mở rộng 18/11 (đơn #BV-DH-20261117-007):
+ * "Muốn 600k thôi" (muốn + số), "679 thì nói chi nữa" (nói chi nữa), và mọi
+ * câu có giá tiền dạng số+k ("600k") đều là mặc cả, không phải địa chỉ. */
 const HAGGLE_LINE =
-  /(co duoc thi mua|duoc thi mua|co duoc khong|duoc khong|co duoc ko|duoc ko|co ban khong|ban duoc khong|ban ko|gia do thi|chot gia|tra gia|mac ca|giam gia|giam ko|bot them|bot khong|bot ko|freeship khong|mien ship khong)/;
+  /(co duoc thi mua|duoc thi mua|co duoc khong|duoc khong|co duoc ko|duoc ko|co ban khong|ban duoc khong|ban ko|gia do thi|chot gia|tra gia|mac ca|giam gia|giam ko|bot them|bot khong|bot ko|freeship khong|mien ship khong|muon\s+\d|\d{2,4}\s*k|noi chi nua)/;
 
 /** Câu PHÀN NÀN về đơn/hàng đã giao KHÔNG phải địa chỉ: "Sao giao Bộ nồi
  * không giống quản cáo vậy..." bị rule từ khóa quận (quan) trong
@@ -165,8 +167,9 @@ function looksLikeAddressLine(line: string): boolean {
   // "600k ..." ở đầu dòng là giá tiền, không phải số nhà
   if (/^\d{3}\s*k\b/.test(strippedLine)) return false;
   // "1 bộ nhé shop" là câu chốt số lượng, không phải số nhà — chặn trước
-  // rule số nhà bên dưới (vá 15/11, test W).
-  if (/^\d+\s*(bộ|món|cái|sp)(\s|$|[.,!?])/i.test(line)) return false;
+  // rule số nhà bên dưới (vá 15/11, test W; 18/11: kiểm trên dòng đã bỏ
+  // dấu để "1 bo nhe shop" không dấu cũng bị chặn — test BA).
+  if (/^\d+\s*(bo|mon|cai|sp)(\s|$|[.,!?])/i.test(strippedLine)) return false;
   if (ADDRESS_KEYWORDS.test(line)) return true;
   if (/^\d+[\s,/]/.test(line)) return true;
   const n = stripVnDiacritics(line).replace(/[.,]/g, " ");
@@ -330,6 +333,13 @@ export function extractAddressFromText(text: string): string | null {
   const m = text.match(ADDRESS_EXTRACT);
   const raw = m?.[1]?.trim();
   if (!raw) return null;
+  // "Theo địa chỉ đó mà gửi nhé" trỏ về địa chỉ cũ — nhãn "địa chỉ" ở đây
+  // không mở đầu địa chỉ thật (đơn #BV-DH-20261117-006, test BB2). Bỏ qua
+  // nhãn này để đường quét dòng / fallback tìm địa chỉ thật.
+  if (m && m.index !== undefined && m.index > 0) {
+    const beforeLabel = stripVnDiacritics(text.slice(0, m.index)).toLowerCase();
+    if (/theo\s*$/.test(beforeLabel)) return null;
+  }
   // Địa chỉ hay viết liền dấu chấm ("A.Phường...") nên vùng bắt cho phép
   // chấm — nhưng câu thừa sau địa chỉ thì cắt: chỉ giữ các đoạn sau dấu
   // ". " khi đoạn đó còn từ khóa địa chỉ ("123 đường X. Tôi muốn mua"
@@ -352,18 +362,35 @@ export function extractAddressFromText(text: string): string | null {
 
 /** Câu chốt mua / đặt hàng thuần túy — KHÔNG phải địa chỉ: "Tôi 1 bộ 6
  * món", "Cho mình 1 bộ", "Ok lấy 1 bộ", "Đặt hàng cho em nhé". Dùng để loại
- * khỏi fallback câu thô bên dưới. */
+ * khỏi fallback câu thô bên dưới. Mẫu KHÔNG DẤU, kiểm trên văn bản đã bỏ
+ * dấu: bản cũ bắt "bộ/món" có dấu trên câu gốc nên "Cho chi mot bo"
+ * (không dấu) lọt qua và thành địa chỉ của khách Minh Hoàng (TGĐGD,
+ * 17/11); "Gửi tôi bộ" (đơn #BV-DH-20261117-006) cũng lọt vì thiếu động
+ * từ gửi. */
 // KHÔNG dùng \b ở đây: \b của JS chỉ hiểu ký tự ASCII nên đứng cạnh
 // chữ có dấu thì hỏng (\b trước "đặt" không bao giờ khớp — test T từng
 // lọt "Đặt hàng cho em nhé"). Dùng neo đầu dòng / khoảng trắng thay thế.
 const PURCHASE_STATEMENT =
-  /((lấy|mua|đặt|chốt)\s+.*(bộ|món|cái|sp|sản phẩm)|^[.,\s]*(tôi|mình|em|anh|chị|cho)\s+.*(bộ|món)|^[.,\s]*\d+\s*(bộ|món|cái)|(đặt hàng|lên đơn|chốt đơn|gửi hàng|ship hàng))/i;
+  /((lay|mua|dat|chot|gui)\s+.*(bo|mon|cai|sp|san pham)|^[.,\s]*(toi|minh|em|anh|chi|cho)\s+.*(bo|mon)|^[.,\s]*\d+\s*(bo|mon|cai)|(dat hang|len don|chot don|gui hang|giao hang|ship hang))/;
+
+/** Câu HỎI — không phải địa chỉ: "Tôi thanh toán khi nhận hàng đúng
+ * không?" từng bị fallback ghi làm địa chỉ của đơn #BV-DH-20261117-006.
+ * Câu hỏi (kết thúc "?", mang từ hỏi, hoặc kết thúc "không") không bao
+ * giờ là thông tin giao hàng. Kiểm trên văn bản đã bỏ dấu. */
+const QUESTION_LINE =
+  /(\?\s*$|(khi nao|bao gio|the nao|lam sao|nhu the nao|tai sao|vi sao|co duoc|duoc khong|dung khong|phai khong|hay khong|co phai)|khong\??\s*$)/;
+
+/** Câu TRỎ về địa chỉ cũ — không phải địa chỉ: "Theo địa chỉ đó mà gửi
+ * nhé" (đơn #BV-DH-20261117-006) chỉ nhắc tới địa chỉ đã đưa trước đó,
+ * bản thân câu không chứa thông tin giao hàng. */
+const REFERENCE_LINE = /(theo dia chi|dia chi cu|dia chi truoc)/;
 
 /** Fallback địa chỉ (chủ shop chốt 15/11): đã có SĐT mà không trích được
  * địa chỉ theo mẫu thì ghi NGUYÊN CÂU của khách để team đọc và hỏi lại,
  * thay vì bỏ đơn. Chỉ lấy câu mới nhất còn giống "đang đưa thông tin"
  * trong 3 tin nhắn gần nhất: đủ dài, không phải câu mặc cả/phàn nàn/
- * nhận xét khoảng cách, không phải câu chốt mua, đã bỏ SĐT khỏi câu. */
+ * nhận xét khoảng cách, không phải câu chốt mua / câu hỏi / câu trỏ về
+ * địa chỉ cũ, đã bỏ SĐT khỏi câu. */
 function extractRawAddressFallback(inbound: FlowMessage[]): string | null {
   const recent = inbound.slice(-3).reverse();
   for (const msg of recent) {
@@ -382,7 +409,9 @@ function extractRawAddressFallback(inbound: FlowMessage[]): string | null {
       if (COMPLAINT_LINE_HARD.test(stripped)) continue;
       if (SYSTEM_LINE.test(stripped)) continue;
       if (REMARK_LINE.test(stripped)) continue;
-      if (PURCHASE_STATEMENT.test(clean)) continue;
+      if (PURCHASE_STATEMENT.test(stripped)) continue;
+      if (QUESTION_LINE.test(stripped)) continue;
+      if (REFERENCE_LINE.test(stripped)) continue;
       return clean;
     }
   }
